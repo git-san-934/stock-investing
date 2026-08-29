@@ -1,5 +1,6 @@
 """売買代金と株価チャートをもとに売り時シグナルを計算するモジュール。"""
 
+import re
 from dataclasses import dataclass
 
 import pandas as pd
@@ -11,6 +12,26 @@ HIGH_LOOKBACK = 60
 NEAR_HIGH_THRESHOLD = 0.95  # 直近60日高値の95%以上を「高値圏」とみなす
 MA_SHORT_WINDOW = 25
 MA_LONG_WINDOW = 75
+
+# シグナルレベルの並び順(値が小さいほど強い)。ウォッチリストのソートに使う。
+SIGNAL_LEVEL_ORDER = {"強": 0, "中": 1, "弱": 2, "なし": 3, "判定不可": 4}
+
+
+def parse_watchlist_codes(raw_text: str, max_codes: int = 10) -> list[str]:
+    """入力テキストを証券コードのリストに変換する(改行・カンマ区切り対応、重複除去)。"""
+    if not raw_text or not raw_text.strip():
+        return []
+
+    codes: list[str] = []
+    for token in re.split(r"[,\n]+", raw_text):
+        code = token.strip().upper()
+        if code and code not in codes:
+            codes.append(code)
+
+    if len(codes) > max_codes:
+        raise ValueError(f"証券コードは最大{max_codes}件までです({len(codes)}件入力されました)")
+
+    return codes
 
 
 def to_ticker_symbol(code: str) -> str:
