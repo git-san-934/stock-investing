@@ -74,7 +74,7 @@ if not summaries:
 
 summary_df = pd.DataFrame(summaries).sort_values("_order").drop(columns="_order")
 st.subheader("ウォッチリスト")
-st.dataframe(summary_df, use_container_width=True, hide_index=True)
+st.dataframe(summary_df, width="stretch", hide_index=True)
 
 selected_code = st.selectbox("詳細を表示する銘柄", summary_df["証券コード"].tolist())
 df, signal = details[selected_code]
@@ -93,7 +93,7 @@ price_fig.add_trace(
 price_fig.add_trace(go.Scatter(x=df.index, y=df["ma_short"], name=f"{MA_SHORT_WINDOW}日移動平均", line=dict(width=1)))
 price_fig.add_trace(go.Scatter(x=df.index, y=df["ma_long"], name=f"{MA_LONG_WINDOW}日移動平均", line=dict(width=1)))
 price_fig.update_layout(title="株価チャート", xaxis_rangeslider_visible=False, height=450)
-st.plotly_chart(price_fig, use_container_width=True)
+st.plotly_chart(price_fig, width="stretch")
 
 turnover_fig = go.Figure()
 turnover_fig.add_trace(go.Bar(x=df.index, y=df["turnover"], name="売買代金"))
@@ -101,7 +101,7 @@ turnover_fig.add_trace(
     go.Scatter(x=df.index, y=df["turnover_ma"], name=f"{TURNOVER_MA_WINDOW}日平均売買代金", line=dict(width=1))
 )
 turnover_fig.update_layout(title="売買代金", height=300)
-st.plotly_chart(turnover_fig, use_container_width=True)
+st.plotly_chart(turnover_fig, width="stretch")
 
 display_columns = ["Close", "Volume", "turnover", "turnover_ratio", "ma_short", "ma_long"]
 st.dataframe(df.tail(20)[display_columns].sort_index(ascending=False))
