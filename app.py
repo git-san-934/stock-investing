@@ -5,13 +5,10 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from stock_signals import (
-    HIGH_LOOKBACK,
     MA_LONG_WINDOW,
     MA_SHORT_WINDOW,
-    NEAR_HIGH_THRESHOLD,
     SIGNAL_LEVEL_ORDER,
     TURNOVER_MA_WINDOW,
-    TURNOVER_SPIKE_RATIO,
     buy_and_hold_return,
     compute_indicators,
     evaluate_sell_signal,
@@ -23,9 +20,9 @@ from stock_signals import (
 st.set_page_config(page_title="売り時判断ダッシュボード", layout="wide")
 
 st.title("株の売り時判断ダッシュボード")
-st.caption("売買代金の急増と株価チャートの動きから売り時の目安を表示します。投資助言ではありません。")
+st.caption(f"株価が{MA_SHORT_WINDOW}日移動平均線を下回ったかどうかから売り時の目安を表示します。投資助言ではありません。")
 
-LEVEL_ICON = {"強": "🔴", "中": "🟠", "弱": "🟡", "なし": "🟢", "判定不可": "⚪"}
+LEVEL_ICON = {"強": "🔴", "なし": "🟢", "判定不可": "⚪"}
 
 
 @st.cache_data(ttl=600)
@@ -44,13 +41,7 @@ with st.sidebar:
 
     st.markdown("---")
     st.markdown("**売りと判断する条件**")
-    st.markdown(
-        f"""
-- 売買代金が直近{TURNOVER_MA_WINDOW}日平均の{TURNOVER_SPIKE_RATIO}倍以上に急増している
-- 上記の急増が、直近{HIGH_LOOKBACK}日高値の{int(NEAR_HIGH_THRESHOLD * 100)}%以上の高値圏で起きている(より強いシグナル)
-- {MA_SHORT_WINDOW}日移動平均線が{MA_LONG_WINDOW}日移動平均線を下回った(デッドクロス)
-"""
-    )
+    st.markdown(f"- 株価(終値)が{MA_SHORT_WINDOW}日移動平均線を下回った")
 
 try:
     codes = parse_watchlist_codes(raw_codes)

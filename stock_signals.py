@@ -7,14 +7,11 @@ import pandas as pd
 import yfinance as yf
 
 TURNOVER_MA_WINDOW = 20
-TURNOVER_SPIKE_RATIO = 2.0  # 当日の売買代金が20日平均の何倍で「急増」とみなすか
-HIGH_LOOKBACK = 60
-NEAR_HIGH_THRESHOLD = 0.95  # 直近60日高値の95%以上を「高値圏」とみなす
 MA_SHORT_WINDOW = 25
 MA_LONG_WINDOW = 75
 
 # シグナルレベルの並び順(値が小さいほど強い)。ウォッチリストのソートに使う。
-SIGNAL_LEVEL_ORDER = {"強": 0, "中": 1, "弱": 2, "なし": 3, "判定不可": 4}
+SIGNAL_LEVEL_ORDER = {"強": 0, "なし": 1, "判定不可": 2}
 
 
 def parse_watchlist_codes(raw_text: str, max_codes: int = 10) -> list[str]:
@@ -55,72 +52,37 @@ def compute_indicators(df: pd.DataFrame) -> pd.DataFrame:
     df["turnover_ratio"] = df["turnover"] / df["turnover_ma"]
     df["ma_short"] = df["Close"].rolling(MA_SHORT_WINDOW).mean()
     df["ma_long"] = df["Close"].rolling(MA_LONG_WINDOW).mean()
-    df["rolling_high"] = df["Close"].rolling(HIGH_LOOKBACK).max()
-    df["near_high"] = df["Close"] >= df["rolling_high"] * NEAR_HIGH_THRESHOLD
     return df
 
 
 @dataclass
 class SellSignal:
-    level: str  # "強" | "中" | "弱" | "なし" | "判定不可"
+    level: str  # "強" | "なし" | "判定不可"
     reasons: list[str]
 
 
-# 閾値条件はcompute_signal_levelsと同じものを使っている。判定条件を変えるときは両方直すこと。
+# 判定条件はcompute_signal_levelsと同じものを使っている。判定条件を変えるときは両方直すこと。
 def evaluate_sell_signal(df: pd.DataFrame) -> SellSignal:
-    if len(df) < MA_LONG_WINDOW + 2:
+    if len(df) < MA_SHORT_WINDOW + 1:
         return SellSignal(level="判定不可", reasons=["データ期間が不足しています"])
 
     latest = df.iloc[-1]
-    prev = df.iloc[-2]
 
-    reasons: list[str] = []
-    score = 0
-
-    turnover_spike = bool(latest["turnover_ratio"] >= TURNOVER_SPIKE_RATIO)
-    if turnover_spike and bool(latest["near_high"]):
-        score += 2
-        reasons.append(
-            f"売買代金が{TURNOVER_MA_WINDOW}日平均の{TURNOVER_SPIKE_RATIO}倍以上に急増しており、"
-            f"かつ高値圏(直近{HIGH_LOOKBACK}日高値の{int(NEAR_HIGH_THRESHOLD * 100)}%以上)にあります"
+    if bool(latest["Close"] < latest["ma_short"]):
+        return SellSignal(
+            level="強",
+            reasons=[f"株価が{MA_SHORT_WINDOW}日移動平均線を下回りました"],
         )
-    elif turnover_spike:
-        score += 1
-        reasons.append(f"売買代金が{TURNOVER_MA_WINDOW}日平均の{TURNOVER_SPIKE_RATIO}倍以上に急増しています")
 
-    dead_cross = bool(prev["ma_short"] >= prev["ma_long"] and latest["ma_short"] < latest["ma_long"])
-    if dead_cross:
-        score += 1
-        reasons.append(f"{MA_SHORT_WINDOW}日移動平均が{MA_LONG_WINDOW}日移動平均を下回りました(デッドクロス)")
-
-    if score >= 3:
-        level = "強"
-    elif score == 2:
-        level = "中"
-    elif score == 1:
-        level = "弱"
-    else:
-        level = "なし"
-        reasons.append("現時点で売り検討シグナルはありません")
-
-    return SellSignal(level=level, reasons=reasons)
+    return SellSignal(level="なし", reasons=["現時点で売り検討シグナルはありません"])
 
 
-# 閾値条件はevaluate_sell_signalと同じものを使っている。判定条件を変えるときは両方直すこと。
+# 判定条件はevaluate_sell_signalと同じものを使っている。判定条件を変えるときは両方直すこと。
 def compute_signal_levels(df: pd.DataFrame) -> pd.Series:
     """バックテスト用に、全営業日ごとの売り検討シグナルレベルを算出する。"""
-    turnover_spike = df["turnover_ratio"] >= TURNOVER_SPIKE_RATIO
-    near_high = df["near_high"].fillna(False)
-    dead_cross = (df["ma_short"].shift(1) >= df["ma_long"].shift(1)) & (df["ma_short"] < df["ma_long"])
-
-    score = (turnover_spike & near_high).astype(int) * 2
-    score += (turnover_spike & ~near_high).astype(int)
-    score += dead_cross.fillna(False).astype(int)
-
+    below_ma_short = df["Close"] < df["ma_short"]
     levels = pd.Series("なし", index=df.index)
-    levels[score == 1] = "弱"
-    levels[score == 2] = "中"
-    levels[score >= 3] = "強"
+    levels[below_ma_short.fillna(False)] = "強"
     return levels
 
 
@@ -134,7 +96,7 @@ class Trade:
     is_open: bool  # True: 期間終了時点でまだ保有中(含み損益)
 
 
-def simulate_sell_strategy(df: pd.DataFrame, sell_levels: tuple[str, ...] = ("強", "中")) -> list[Trade]:
+def simulate_sell_strategy(df: pd.DataFrame, sell_levels: tuple[str, ...] = ("強",)) -> list[Trade]:
     """シグナルに従って売買していた場合の簡易シミュレーションを行う(参考値、投資助言ではない)。
 
     ルール: 期間最初の営業日の終値で買う → シグナルがsell_levelsに該当した日の終値で売る
