@@ -12,10 +12,12 @@ from stock_signals import (
     SIGNAL_LEVEL_ORDER,
     TURNOVER_MA_WINDOW,
     TURNOVER_SPIKE_RATIO,
+    buy_and_hold_return,
     compute_indicators,
     evaluate_sell_signal,
     fetch_price_history,
     parse_watchlist_codes,
+    simulate_sell_strategy,
 )
 
 st.set_page_config(page_title="売り時判断ダッシュボード", layout="wide")
@@ -127,3 +129,34 @@ for i, code in enumerate(summary_df["証券コード"].tolist()):
             width="stretch",
             key=f"table_{code}",
         )
+
+        st.markdown("**過去データでのシミュレーション**")
+        st.caption(
+            "シグナルが「強」「中」になった日に売り、「なし」に戻った次の営業日に買い直すルールで計算した"
+            "参考値です。手数料・税金は考慮しておらず、将来の成果を保証するものではありません。"
+        )
+
+        trades = simulate_sell_strategy(df)
+        hold_return = buy_and_hold_return(df)
+
+        sim_multiplier = 1.0
+        for trade in trades:
+            sim_multiplier *= 1 + trade.return_pct / 100
+        sim_return = (sim_multiplier - 1) * 100
+
+        col1, col2 = st.columns(2)
+        col1.metric("シグナル通り売買した場合", f"{sim_return:+.1f}%")
+        col2.metric("ずっと保有し続けた場合(買い持ち)", f"{hold_return:+.1f}%")
+
+        trades_rows = [
+            {
+                "購入日": trade.entry_date.strftime("%Y-%m-%d"),
+                "購入価格": round(trade.entry_price, 1),
+                "売却日": "保有中" if trade.is_open else trade.exit_date.strftime("%Y-%m-%d"),
+                "売却価格": round(trade.exit_price, 1),
+                "損益率": f"{trade.return_pct:+.1f}%",
+                "状態": "含み損益" if trade.is_open else "確定",
+            }
+            for trade in trades
+        ]
+        st.dataframe(pd.DataFrame(trades_rows), width="stretch", hide_index=True, key=f"trades_{code}")

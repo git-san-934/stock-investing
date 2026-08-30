@@ -66,6 +66,7 @@ class SellSignal:
     reasons: list[str]
 
 
+# 閾値条件はcompute_signal_levelsと同じものを使っている。判定条件を変えるときは両方直すこと。
 def evaluate_sell_signal(df: pd.DataFrame) -> SellSignal:
     if len(df) < MA_LONG_WINDOW + 2:
         return SellSignal(level="判定不可", reasons=["データ期間が不足しています"])
@@ -103,3 +104,79 @@ def evaluate_sell_signal(df: pd.DataFrame) -> SellSignal:
         reasons.append("現時点で売り検討シグナルはありません")
 
     return SellSignal(level=level, reasons=reasons)
+
+
+# 閾値条件はevaluate_sell_signalと同じものを使っている。判定条件を変えるときは両方直すこと。
+def compute_signal_levels(df: pd.DataFrame) -> pd.Series:
+    """バックテスト用に、全営業日ごとの売り検討シグナルレベルを算出する。"""
+    turnover_spike = df["turnover_ratio"] >= TURNOVER_SPIKE_RATIO
+    near_high = df["near_high"].fillna(False)
+    dead_cross = (df["ma_short"].shift(1) >= df["ma_long"].shift(1)) & (df["ma_short"] < df["ma_long"])
+
+    score = (turnover_spike & near_high).astype(int) * 2
+    score += (turnover_spike & ~near_high).astype(int)
+    score += dead_cross.fillna(False).astype(int)
+
+    levels = pd.Series("なし", index=df.index)
+    levels[score == 1] = "弱"
+    levels[score == 2] = "中"
+    levels[score >= 3] = "強"
+    return levels
+
+
+@dataclass
+class Trade:
+    entry_date: pd.Timestamp
+    entry_price: float
+    exit_date: pd.Timestamp
+    exit_price: float
+    return_pct: float
+    is_open: bool  # True: 期間終了時点でまだ保有中(含み損益)
+
+
+def simulate_sell_strategy(df: pd.DataFrame, sell_levels: tuple[str, ...] = ("強", "中")) -> list[Trade]:
+    """シグナルに従って売買していた場合の簡易シミュレーションを行う(参考値、投資助言ではない)。
+
+    ルール: 期間最初の営業日の終値で買う → シグナルがsell_levelsに該当した日の終値で売る
+    → シグナルが「なし」に戻った次の営業日の終値で買い直す → 期間終了時点で保有中なら含み損益として計上する。
+    手数料・税金は考慮しない。
+    """
+    levels = compute_signal_levels(df)
+
+    trades: list[Trade] = []
+    holding = True
+    waiting_to_reenter = False
+    entry_date = df.index[0]
+    entry_price = float(df["Close"].iloc[0])
+
+    for date, level in levels.items():
+        if date == entry_date:
+            continue
+
+        price = float(df.loc[date, "Close"])
+
+        if holding and level in sell_levels:
+            return_pct = (price - entry_price) / entry_price * 100
+            trades.append(Trade(entry_date, entry_price, date, price, return_pct, is_open=False))
+            holding = False
+            waiting_to_reenter = True
+        elif waiting_to_reenter and level == "なし":
+            entry_date = date
+            entry_price = price
+            holding = True
+            waiting_to_reenter = False
+
+    if holding:
+        last_date = df.index[-1]
+        last_price = float(df["Close"].iloc[-1])
+        return_pct = (last_price - entry_price) / entry_price * 100
+        trades.append(Trade(entry_date, entry_price, last_date, last_price, return_pct, is_open=True))
+
+    return trades
+
+
+def buy_and_hold_return(df: pd.DataFrame) -> float:
+    """期間最初の終値で買ってからずっと保有し続けた場合の損益率(%)を返す。"""
+    first_price = float(df["Close"].iloc[0])
+    last_price = float(df["Close"].iloc[-1])
+    return (last_price - first_price) / first_price * 100
