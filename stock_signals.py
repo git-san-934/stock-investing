@@ -45,8 +45,88 @@ def fetch_price_history(code: str, period: str = "1y") -> pd.DataFrame:
     return df
 
 
+# 主要な東証銘柄の日本語社名。yfinanceの企業名は基本的に英語表記のため、
+# 代表的な銘柄のみ静的に保持し、優先的に使う。
+TSE_COMPANY_NAMES: dict[str, str] = {
+    "7203": "トヨタ自動車",
+    "9984": "ソフトバンクグループ",
+    "9434": "ソフトバンク",
+    "6758": "ソニーグループ",
+    "6861": "キーエンス",
+    "8306": "三菱UFJフィナンシャル・グループ",
+    "9432": "日本電信電話",
+    "9433": "KDDI",
+    "4063": "信越化学工業",
+    "6098": "リクルートホールディングス",
+    "6501": "日立製作所",
+    "6502": "東芝",
+    "6503": "三菱電機",
+    "6752": "パナソニックホールディングス",
+    "6902": "デンソー",
+    "6954": "ファナック",
+    "7011": "三菱重工業",
+    "7201": "日産自動車",
+    "7267": "本田技研工業",
+    "7269": "スズキ",
+    "7270": "SUBARU",
+    "7741": "HOYA",
+    "7751": "キヤノン",
+    "7974": "任天堂",
+    "8001": "伊藤忠商事",
+    "8002": "丸紅",
+    "8031": "三井物産",
+    "8035": "東京エレクトロン",
+    "8053": "住友商事",
+    "8058": "三菱商事",
+    "8113": "ユニ・チャーム",
+    "8267": "イオン",
+    "8316": "三井住友フィナンシャルグループ",
+    "8411": "みずほフィナンシャルグループ",
+    "8591": "オリックス",
+    "8766": "東京海上ホールディングス",
+    "8801": "三井不動産",
+    "8802": "三菱地所",
+    "9020": "東日本旅客鉄道",
+    "9022": "東海旅客鉄道",
+    "9101": "日本郵船",
+    "9104": "商船三井",
+    "9202": "ANAホールディングス",
+    "9501": "東京電力ホールディングス",
+    "9503": "関西電力",
+    "9613": "エヌ・ティ・ティ・データグループ",
+    "9843": "ニトリホールディングス",
+    "9983": "ファーストリテイリング",
+    "4502": "武田薬品工業",
+    "4503": "アステラス製薬",
+    "4519": "中外製薬",
+    "4568": "第一三共",
+    "4661": "オリエンタルランド",
+    "4689": "LINEヤフー",
+    "4901": "富士フイルムホールディングス",
+    "4911": "資生堂",
+    "5108": "ブリヂストン",
+    "5401": "日本製鉄",
+    "6178": "日本郵政",
+    "6301": "コマツ",
+    "6326": "クボタ",
+    "6367": "ダイキン工業",
+    "6702": "富士通",
+    "6723": "ルネサスエレクトロニクス",
+    "6971": "京セラ",
+    "6981": "村田製作所",
+}
+
+
 def fetch_company_name(code: str) -> str:
-    """証券コードから銘柄名(会社名)を取得する。取得できない場合は証券コードをそのまま返す。"""
+    """証券コードから銘柄名を取得する。
+
+    既知の主要銘柄はTSE_COMPANY_NAMESの日本語社名を返す。それ以外は
+    yfinanceの英語社名、取得できない場合は証券コードをそのまま返す。
+    """
+    normalized = code.strip().upper().removesuffix(".T")
+    if normalized in TSE_COMPANY_NAMES:
+        return TSE_COMPANY_NAMES[normalized]
+
     symbol = to_ticker_symbol(code)
     try:
         info = yf.Ticker(symbol).info
@@ -78,11 +158,13 @@ def evaluate_sell_signal(df: pd.DataFrame) -> SellSignal:
         return SellSignal(level="判定不可", reasons=["データ期間が不足しています"])
 
     latest = df.iloc[-1]
+    prev = df.iloc[-2]
 
-    if bool(latest["Close"] < latest["ma_short"]):
+    crossed_below = bool(prev["Close"] >= prev["ma_short"] and latest["Close"] < latest["ma_short"])
+    if crossed_below:
         return SellSignal(
             level="強",
-            reasons=[f"株価が{MA_SHORT_WINDOW}日移動平均線を下回りました"],
+            reasons=[f"前日は{MA_SHORT_WINDOW}日移動平均線の上にあった株価が、本日下回りました"],
         )
 
     return SellSignal(level="なし", reasons=["現時点で売り検討シグナルはありません"])
@@ -91,9 +173,12 @@ def evaluate_sell_signal(df: pd.DataFrame) -> SellSignal:
 # 判定条件はevaluate_sell_signalと同じものを使っている。判定条件を変えるときは両方直すこと。
 def compute_signal_levels(df: pd.DataFrame) -> pd.Series:
     """バックテスト用に、全営業日ごとの売り検討シグナルレベルを算出する。"""
-    below_ma_short = df["Close"] < df["ma_short"]
+    prev_close = df["Close"].shift(1)
+    prev_ma_short = df["ma_short"].shift(1)
+    crossed_below = (prev_close >= prev_ma_short) & (df["Close"] < df["ma_short"])
+
     levels = pd.Series("なし", index=df.index)
-    levels[below_ma_short.fillna(False)] = "強"
+    levels[crossed_below.fillna(False)] = "強"
     return levels
 
 

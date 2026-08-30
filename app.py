@@ -22,7 +22,7 @@ from stock_signals import (
 st.set_page_config(page_title="売り時判断ダッシュボード", layout="wide")
 
 st.title("株の売り時判断ダッシュボード")
-st.caption(f"株価が{MA_SHORT_WINDOW}日移動平均線を下回ったかどうかから売り時の目安を表示します。投資助言ではありません。")
+st.caption(f"株価が{MA_SHORT_WINDOW}日移動平均線を下抜けたタイミングから売り時の目安を表示します。投資助言ではありません。")
 
 LEVEL_ICON = {"強": "🔴", "なし": "🟢", "判定不可": "⚪"}
 
@@ -48,7 +48,7 @@ with st.sidebar:
 
     st.markdown("---")
     st.markdown("**売りと判断する条件**")
-    st.markdown(f"- 株価(終値)が{MA_SHORT_WINDOW}日移動平均線を下回った")
+    st.markdown(f"- 前日終値が{MA_SHORT_WINDOW}日移動平均線の上にあり、本日終値が下回った(下抜けの瞬間)")
 
 try:
     codes = parse_watchlist_codes(raw_codes)
