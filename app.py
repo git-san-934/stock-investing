@@ -11,6 +11,7 @@ from stock_signals import (
     TURNOVER_MA_WINDOW,
     buy_and_hold_return,
     compute_indicators,
+    compute_signal_levels,
     evaluate_sell_signal,
     fetch_company_name,
     fetch_price_history,
@@ -113,6 +114,20 @@ for i, code in enumerate(summary_df["証券コード"].tolist()):
         price_fig.add_trace(
             go.Scatter(x=df.index, y=df["ma_long"], name=f"{MA_LONG_WINDOW}日移動平均", line=dict(width=1))
         )
+
+        levels = compute_signal_levels(df)
+        sell_dates = df.index[levels == "強"]
+        if len(sell_dates) > 0:
+            price_fig.add_trace(
+                go.Scatter(
+                    x=sell_dates,
+                    y=df.loc[sell_dates, "High"] * 1.02,
+                    mode="markers",
+                    marker=dict(symbol="triangle-down", size=11, color="red"),
+                    name="売りシグナル",
+                )
+            )
+
         price_fig.update_layout(title="株価チャート", xaxis_rangeslider_visible=False, height=450)
         st.plotly_chart(price_fig, width="stretch", key=f"price_{code}")
 
