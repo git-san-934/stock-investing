@@ -45,6 +45,17 @@ def fetch_price_history(code: str, period: str = "1y") -> pd.DataFrame:
     return df
 
 
+def fetch_company_name(code: str) -> str:
+    """証券コードから銘柄名(会社名)を取得する。取得できない場合は証券コードをそのまま返す。"""
+    symbol = to_ticker_symbol(code)
+    try:
+        info = yf.Ticker(symbol).info
+        name = info.get("longName") or info.get("shortName")
+    except Exception:
+        name = None
+    return name or code
+
+
 def compute_indicators(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     df["turnover"] = df["Close"] * df["Volume"]

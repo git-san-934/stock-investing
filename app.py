@@ -12,6 +12,7 @@ from stock_signals import (
     buy_and_hold_return,
     compute_indicators,
     evaluate_sell_signal,
+    fetch_company_name,
     fetch_price_history,
     parse_watchlist_codes,
     simulate_sell_strategy,
@@ -28,6 +29,11 @@ LEVEL_ICON = {"強": "🔴", "なし": "🟢", "判定不可": "⚪"}
 @st.cache_data(ttl=600)
 def load_price_history(code: str, period: str) -> pd.DataFrame:
     return fetch_price_history(code, period=period)
+
+
+@st.cache_data(ttl=3600)
+def load_company_name(code: str) -> str:
+    return fetch_company_name(code)
 
 
 with st.sidebar:
@@ -55,6 +61,7 @@ if not codes:
 
 summaries = []
 details = {}
+names = {}
 for code in codes:
     try:
         df = load_price_history(code, period)
@@ -64,10 +71,13 @@ for code in codes:
         st.warning(f"{code}: {e}")
         continue
 
+    name = load_company_name(code)
     details[code] = (df, signal)
+    names[code] = name
     summaries.append(
         {
             "証券コード": code,
+            "銘柄名": name,
             "最新終値": round(float(df["Close"].iloc[-1]), 1),
             "シグナル": f"{LEVEL_ICON.get(signal.level, '')} {signal.level}",
             "主な理由": signal.reasons[0] if signal.reasons else "",
@@ -85,7 +95,7 @@ st.dataframe(summary_df, width="stretch", hide_index=True)
 st.subheader("銘柄ごとの詳細")
 for i, code in enumerate(summary_df["証券コード"].tolist()):
     df, signal = details[code]
-    header = f"{LEVEL_ICON.get(signal.level, '')} {code}  売り検討シグナル: {signal.level}"
+    header = f"{LEVEL_ICON.get(signal.level, '')} {code} {names[code]}  売り検討シグナル: {signal.level}"
     with st.expander(header, expanded=(i == 0)):
         for reason in signal.reasons:
             st.write(f"- {reason}")
@@ -123,7 +133,7 @@ for i, code in enumerate(summary_df["証券コード"].tolist()):
 
         st.markdown("**過去データでのシミュレーション**")
         st.caption(
-            "シグナルが「強」「中」になった日に売り、「なし」に戻った次の営業日に買い直すルールで計算した"
+            "シグナルが「強」になった日に売り、「なし」に戻った次の営業日に買い直すルールで計算した"
             "参考値です。手数料・税金は考慮しておらず、将来の成果を保証するものではありません。"
         )
 
