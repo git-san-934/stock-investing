@@ -5,10 +5,13 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from stock_signals import (
+    HIGH_LOOKBACK,
     MA_LONG_WINDOW,
     MA_SHORT_WINDOW,
+    NEAR_HIGH_THRESHOLD,
     SIGNAL_LEVEL_ORDER,
     TURNOVER_MA_WINDOW,
+    TURNOVER_SPIKE_RATIO,
     compute_indicators,
     evaluate_sell_signal,
     fetch_price_history,
@@ -36,6 +39,16 @@ with st.sidebar:
     )
     period = st.selectbox("表示期間", ["6mo", "1y", "2y"], index=1)
     st.button("表示する")
+
+    st.markdown("---")
+    st.markdown("**売りと判断する条件**")
+    st.markdown(
+        f"""
+- 売買代金が直近{TURNOVER_MA_WINDOW}日平均の{TURNOVER_SPIKE_RATIO}倍以上に急増している
+- 上記の急増が、直近{HIGH_LOOKBACK}日高値の{int(NEAR_HIGH_THRESHOLD * 100)}%以上の高値圏で起きている(より強いシグナル)
+- {MA_SHORT_WINDOW}日移動平均線が{MA_LONG_WINDOW}日移動平均線を下回った(デッドクロス)
+"""
+    )
 
 try:
     codes = parse_watchlist_codes(raw_codes)
