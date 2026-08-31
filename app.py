@@ -25,6 +25,7 @@ st.title("株の売り時判断ダッシュボード")
 st.caption(f"株価が{MA_SHORT_WINDOW}日移動平均線を下抜けたタイミングから売り時の目安を表示します。投資助言ではありません。")
 
 LEVEL_ICON = {"強": "🔴", "なし": "🟢", "判定不可": "⚪"}
+LEVEL_LABEL = {"強": "売", "なし": "なし", "判定不可": "判定不可"}
 
 
 @st.cache_data(ttl=600)
@@ -80,7 +81,7 @@ for code in codes:
             "証券コード": code,
             "銘柄名": name,
             "最新終値": round(float(df["Close"].iloc[-1]), 1),
-            "シグナル": f"{LEVEL_ICON.get(signal.level, '')} {signal.level}",
+            "シグナル": f"{LEVEL_ICON.get(signal.level, '')} {LEVEL_LABEL.get(signal.level, signal.level)}",
             "主な理由": signal.reasons[0] if signal.reasons else "",
             "_order": SIGNAL_LEVEL_ORDER.get(signal.level, 99),
         }
@@ -96,7 +97,7 @@ st.dataframe(summary_df, width="stretch", hide_index=True)
 st.subheader("銘柄ごとの詳細")
 for i, code in enumerate(summary_df["証券コード"].tolist()):
     df, signal = details[code]
-    header = f"{LEVEL_ICON.get(signal.level, '')} {code} {names[code]}  売り検討シグナル: {signal.level}"
+    header = f"{LEVEL_ICON.get(signal.level, '')} {code} {names[code]}  売り検討シグナル: {LEVEL_LABEL.get(signal.level, signal.level)}"
     with st.expander(header, expanded=(i == 0)):
         for reason in signal.reasons:
             st.write(f"- {reason}")
