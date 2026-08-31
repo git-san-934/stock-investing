@@ -49,6 +49,7 @@ def fetch_price_history(code: str, period: str = "1y") -> pd.DataFrame:
 # 代表的な銘柄のみ静的に保持し、優先的に使う。
 TSE_COMPANY_NAMES: dict[str, str] = {
     "7203": "トヨタ自動車",
+    "285A": "キオクシアホールディングス",
     "9984": "ソフトバンクグループ",
     "9434": "ソフトバンク",
     "6758": "ソニーグループ",
