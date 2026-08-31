@@ -32,6 +32,51 @@ def zone_segments(levels: pd.Series) -> list[tuple]:
     return [(group.index[0], group.index[-1], group.iloc[0]) for _, group in valid.groupby(group_id)]
 
 
+def render_price_chart(df: pd.DataFrame, key: str) -> None:
+    """株価チャート(ローソク足 + 移動平均線 + 買い時/様子見の背景帯)を描画する。
+
+    ウォッチリスト・有望銘柄(AI選定)の両タブから共通で使う。
+    """
+    price_fig = go.Figure()
+    price_fig.add_trace(
+        go.Candlestick(
+            x=df.index, open=df["Open"], high=df["High"], low=df["Low"], close=df["Close"],
+            name="株価",
+        )
+    )
+    price_fig.add_trace(
+        go.Scatter(x=df.index, y=df["ma_short"], name=f"{MA_SHORT_WINDOW}日移動平均", line=dict(width=1))
+    )
+    price_fig.add_trace(
+        go.Scatter(x=df.index, y=df["ma_long"], name=f"{MA_LONG_WINDOW}日移動平均", line=dict(width=1))
+    )
+
+    buy_zone_levels = compute_buy_zone_levels(df)
+    for start, end, state in zone_segments(buy_zone_levels):
+        price_fig.add_vrect(
+            x0=start,
+            x1=end + pd.Timedelta(days=1),
+            fillcolor=ZONE_COLOR[state],
+            line_width=0,
+            layer="below",
+        )
+    for state, color in ZONE_COLOR.items():
+        price_fig.add_trace(
+            go.Scatter(
+                x=[None], y=[None], mode="markers",
+                marker=dict(size=10, color=color, symbol="square"),
+                name=state,
+            )
+        )
+
+    price_fig.update_layout(title="株価チャート", xaxis_rangeslider_visible=False, height=450)
+    st.plotly_chart(price_fig, width="stretch", key=key)
+    st.caption(
+        f"背景色は終値と{MA_SHORT_WINDOW}日移動平均線の位置関係を表します"
+        "(買い時=赤、様子見=黄色)。"
+    )
+
+
 st.set_page_config(page_title="売り時・買い時判断ダッシュボード", layout="wide")
 
 st.title("株の売り時・買い時判断ダッシュボード")
@@ -138,44 +183,7 @@ def render_watchlist_tab(raw_codes: str, period: str) -> None:
             for reason in signal.reasons:
                 st.write(f"- {reason}")
 
-            price_fig = go.Figure()
-            price_fig.add_trace(
-                go.Candlestick(
-                    x=df.index, open=df["Open"], high=df["High"], low=df["Low"], close=df["Close"],
-                    name="株価",
-                )
-            )
-            price_fig.add_trace(
-                go.Scatter(x=df.index, y=df["ma_short"], name=f"{MA_SHORT_WINDOW}日移動平均", line=dict(width=1))
-            )
-            price_fig.add_trace(
-                go.Scatter(x=df.index, y=df["ma_long"], name=f"{MA_LONG_WINDOW}日移動平均", line=dict(width=1))
-            )
-
-            buy_zone_levels = compute_buy_zone_levels(df)
-            for start, end, state in zone_segments(buy_zone_levels):
-                price_fig.add_vrect(
-                    x0=start,
-                    x1=end + pd.Timedelta(days=1),
-                    fillcolor=ZONE_COLOR[state],
-                    line_width=0,
-                    layer="below",
-                )
-            for state, color in ZONE_COLOR.items():
-                price_fig.add_trace(
-                    go.Scatter(
-                        x=[None], y=[None], mode="markers",
-                        marker=dict(size=10, color=color, symbol="square"),
-                        name=state,
-                    )
-                )
-
-            price_fig.update_layout(title="株価チャート", xaxis_rangeslider_visible=False, height=450)
-            st.plotly_chart(price_fig, width="stretch", key=f"price_{code}")
-            st.caption(
-                f"背景色は終値と{MA_SHORT_WINDOW}日移動平均線の位置関係を表します"
-                "(買い時=赤、様子見=黄色)。"
-            )
+            render_price_chart(df, key=f"price_{code}")
 
             turnover_fig = go.Figure()
             turnover_fig.add_trace(go.Bar(x=df.index, y=df["turnover"], name="売買代金"))
@@ -257,11 +265,18 @@ def render_promising_tab(period: str) -> None:
             )
             st.dataframe(ranking_df, width="stretch", hide_index=True)
 
-            st.markdown("**算出根拠**")
+            st.markdown("**算出根拠・チャート**")
             for i, s in enumerate(top_stocks):
                 with st.expander(f"{i + 1}位 {s.code} {s.name}(スコア: {s.score:.2f})"):
                     for reason in s.reasons:
                         st.write(f"- {reason}")
+
+                    try:
+                        chart_df = compute_indicators(load_price_history(s.code, period))
+                    except Exception as e:
+                        st.warning(f"チャート用データの取得に失敗しました: {e}")
+                    else:
+                        render_price_chart(chart_df, key=f"promising_price_{s.code}")
     else:
         st.info("ボタンを押すと、対象ユニバース内のデータを取得してスコアリングを実行します(数十秒〜数分かかる場合があります)。")
 
