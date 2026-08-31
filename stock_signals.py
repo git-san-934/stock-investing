@@ -37,7 +37,14 @@ def to_ticker_symbol(code: str) -> str:
 
 def fetch_price_history(code: str, period: str = "1y") -> pd.DataFrame:
     symbol = to_ticker_symbol(code)
-    df = yf.Ticker(symbol).history(period=period)
+    # "3y"はyfinance/Yahoo Finance側が正式サポートするperiod値(6mo/1y/2y/5y/10y等)に
+    # 含まれないため、開始日・終了日を明示的に指定して取得する。
+    if period == "3y":
+        end = pd.Timestamp.today()
+        start = end - pd.DateOffset(years=3)
+        df = yf.Ticker(symbol).history(start=start, end=end)
+    else:
+        df = yf.Ticker(symbol).history(period=period)
     if df.empty:
         raise ValueError(f"銘柄コード {code} のデータを取得できませんでした")
     return df
@@ -273,7 +280,12 @@ def fetch_price_history_batch(codes: list[str], period: str = "6mo") -> dict[str
     取得できなかった(データが空の)銘柄は結果に含めない。
     """
     symbols = [to_ticker_symbol(code) for code in codes]
-    raw = yf.download(symbols, period=period, group_by="ticker", progress=False, threads=True)
+    if period == "3y":
+        end = pd.Timestamp.today()
+        start = end - pd.DateOffset(years=3)
+        raw = yf.download(symbols, start=start, end=end, group_by="ticker", progress=False, threads=True)
+    else:
+        raw = yf.download(symbols, period=period, group_by="ticker", progress=False, threads=True)
 
     result: dict[str, pd.DataFrame] = {}
     for code, symbol in zip(codes, symbols):
