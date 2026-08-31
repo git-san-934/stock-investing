@@ -1,6 +1,7 @@
 """売買代金と株価チャートをもとに買い時/様子見シグナルを計算するモジュール。"""
 
 import re
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -279,29 +280,48 @@ def load_universe() -> pd.DataFrame:
         return pd.read_csv(UNIVERSE_CSV_PATH, dtype={"code": str}, encoding="cp932")
 
 
-def fetch_price_history_batch(codes: list[str], period: str = "6mo") -> dict[str, pd.DataFrame]:
-    """複数銘柄の株価データをまとめて取得する(1銘柄ずつ取得するより通信回数を抑える)。
+BATCH_CHUNK_SIZE = 20
+BATCH_CHUNK_DELAY_SEC = 2.0
 
-    取得できなかった(データが空の)銘柄は結果に含めない。
-    """
-    symbols = [to_ticker_symbol(code) for code in codes]
+
+def _download_chunk(symbols: list[str], period: str) -> pd.DataFrame:
     if period == "3y":
         end = pd.Timestamp.today()
         start = end - pd.DateOffset(years=3)
-        raw = yf.download(symbols, start=start, end=end, group_by="ticker", progress=False, threads=True)
-    else:
-        raw = yf.download(symbols, period=period, group_by="ticker", progress=False, threads=True)
+        return yf.download(symbols, start=start, end=end, group_by="ticker", progress=False, threads=True)
+    return yf.download(symbols, period=period, group_by="ticker", progress=False, threads=True)
+
+
+def fetch_price_history_batch(codes: list[str], period: str = "6mo") -> dict[str, pd.DataFrame]:
+    """複数銘柄の株価データをまとめて取得する(1銘柄ずつ取得するより通信回数を抑える)。
+
+    一度に大量の銘柄を同時リクエストするとYahoo Finance側のレート制限に
+    かかりやすいため、BATCH_CHUNK_SIZE件ずつに分割し、チャンク間にわずかな
+    待機時間(BATCH_CHUNK_DELAY_SEC秒)を挟んで取得する。
+    取得できなかった(データが空の)銘柄は結果に含めない。
+    """
+    symbols = [to_ticker_symbol(code) for code in codes]
+    code_by_symbol = dict(zip(symbols, codes))
 
     result: dict[str, pd.DataFrame] = {}
-    for code, symbol in zip(codes, symbols):
-        try:
-            df = raw[symbol] if len(symbols) > 1 else raw
-        except KeyError:
-            continue
-        df = df.dropna(how="all")
-        if df.empty:
-            continue
-        result[code] = df
+    for i in range(0, len(symbols), BATCH_CHUNK_SIZE):
+        chunk_symbols = symbols[i : i + BATCH_CHUNK_SIZE]
+        raw = _download_chunk(chunk_symbols, period)
+
+        for symbol in chunk_symbols:
+            code = code_by_symbol[symbol]
+            try:
+                df = raw[symbol] if len(chunk_symbols) > 1 else raw
+            except KeyError:
+                continue
+            df = df.dropna(how="all")
+            if df.empty:
+                continue
+            result[code] = df
+
+        if i + BATCH_CHUNK_SIZE < len(symbols):
+            time.sleep(BATCH_CHUNK_DELAY_SEC)
+
     return result
 
 
