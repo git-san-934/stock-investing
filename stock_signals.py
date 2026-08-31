@@ -14,7 +14,7 @@ MA_LONG_WINDOW = 75
 SIGNAL_LEVEL_ORDER = {"強": 0, "なし": 1, "判定不可": 2}
 
 
-def parse_watchlist_codes(raw_text: str, max_codes: int = 10) -> list[str]:
+def parse_watchlist_codes(raw_text: str, max_codes: int = 50) -> list[str]:
     """入力テキストを証券コードのリストに変換する(改行・カンマ区切り対応、重複除去)。"""
     if not raw_text or not raw_text.strip():
         return []

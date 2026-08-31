@@ -40,7 +40,7 @@ def load_company_name(code: str) -> str:
 
 with st.sidebar:
     raw_codes = st.text_area(
-        "証券コード(最大10件、改行またはカンマ区切り)",
+        "証券コード(最大50件、改行またはカンマ区切り)",
         value="285A\n9984\n1329",
         help="例: トヨタ自動車なら 7203。複数銘柄はカンマまたは改行で区切ってください。",
     )
