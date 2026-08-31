@@ -8,6 +8,7 @@ from stock_signals import (
     BUY_ZONE_ORDER,
     MA_LONG_WINDOW,
     MA_SHORT_WINDOW,
+    MARKET_SEGMENTS,
     TURNOVER_MA_WINDOW,
     buy_and_hold_return,
     compute_buy_zone_levels,
@@ -16,7 +17,7 @@ from stock_signals import (
     fetch_company_name,
     fetch_price_history,
     parse_watchlist_codes,
-    select_top_promising,
+    select_top_promising_by_market,
     simulate_buy_zone_strategy,
 )
 
@@ -97,8 +98,8 @@ def load_company_name(code: str) -> str:
 
 
 @st.cache_data(ttl=86400)
-def load_top_promising(n: int, period: str):
-    return select_top_promising(n=n, period=period)
+def load_top_promising_by_market(n_per_market: int, period: str):
+    return select_top_promising_by_market(n_per_market=n_per_market, period=period)
 
 
 with st.sidebar:
@@ -236,47 +237,56 @@ def render_promising_tab(period: str) -> None:
     """「有望銘柄(AI選定)」タブの内容を描画する。"""
     st.subheader("有望銘柄(AI選定)")
     st.caption(
-        "対象ユニバース内の銘柄を独自のルールベースでスコアリングし、上位10銘柄を表示します。"
+        "対象ユニバース内の銘柄を独自のルールベースでスコアリングし、"
+        "プライム/スタンダード/グロースの市場区分ごとに上位10銘柄を表示します。"
         "外部AI/LLMは使用していません。投資助言ではなく、あくまで参考情報です。"
     )
     st.caption(
         "対象ユニバースは東証全銘柄(約3,900件)を網羅したものではなく、主要銘柄を中心とした静的リストです。"
+        "特にスタンダード・グロース市場の候補は、公式データを直接参照できない制約のもとで作成した一覧のため、"
+        "件数が少なく、市場区分に誤りが含まれる可能性があります。"
     )
 
     if st.button("有望銘柄を探索する"):
         progress = st.progress(0, text="対象銘柄のデータを取得・スコアリング中です…")
-        top_stocks = []
+        results: dict = {}
         try:
-            top_stocks = load_top_promising(10, period)
+            results = load_top_promising_by_market(10, period)
         except Exception as e:
             st.error(f"有望銘柄の算出中にエラーが発生しました: {e}")
         finally:
             progress.progress(100, text="完了しました")
             progress.empty()
 
-        if not top_stocks:
+        if not results:
             st.warning("有望銘柄を算出できませんでした。データ取得状況をご確認ください。")
         else:
-            ranking_df = pd.DataFrame(
-                [
-                    {"順位": i + 1, "証券コード": s.code, "銘柄名": s.name, "スコア": round(s.score, 2)}
-                    for i, s in enumerate(top_stocks)
-                ]
-            )
-            st.dataframe(ranking_df, width="stretch", hide_index=True)
+            for market in MARKET_SEGMENTS:
+                top_stocks = results.get(market, [])
+                st.markdown(f"### {market}市場")
+                if not top_stocks:
+                    st.info(f"{market}市場の候補からは有望銘柄を算出できませんでした。")
+                    continue
 
-            st.markdown("**算出根拠・チャート**")
-            for i, s in enumerate(top_stocks):
-                with st.expander(f"{i + 1}位 {s.code} {s.name}(スコア: {s.score:.2f})"):
-                    for reason in s.reasons:
-                        st.write(f"- {reason}")
+                ranking_df = pd.DataFrame(
+                    [
+                        {"順位": i + 1, "証券コード": s.code, "銘柄名": s.name, "スコア": round(s.score, 2)}
+                        for i, s in enumerate(top_stocks)
+                    ]
+                )
+                st.dataframe(ranking_df, width="stretch", hide_index=True)
 
-                    try:
-                        chart_df = compute_indicators(load_price_history(s.code, period))
-                    except Exception as e:
-                        st.warning(f"チャート用データの取得に失敗しました: {e}")
-                    else:
-                        render_price_chart(chart_df, key=f"promising_price_{s.code}")
+                for i, s in enumerate(top_stocks):
+                    with st.expander(f"{i + 1}位 {s.code} {s.name}(スコア: {s.score:.2f})"):
+                        for reason in s.reasons:
+                            st.write(f"- {reason}")
+
+                        try:
+                            chart_df = compute_indicators(load_price_history(s.code, period))
+                        except Exception as e:
+                            st.warning(f"チャート用データの取得に失敗しました: {e}")
+                        else:
+                            render_price_chart(chart_df, key=f"promising_price_{market}_{s.code}")
     else:
         st.info("ボタンを押すと、対象ユニバース内のデータを取得してスコアリングを実行します(数十秒〜数分かかる場合があります)。")
 

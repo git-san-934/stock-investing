@@ -334,15 +334,23 @@ def score_stock(df: pd.DataFrame) -> float | None:
     )
 
 
-def select_top_promising(n: int = 10, period: str = "6mo") -> list[PromisingStock]:
-    """対象ユニバースの中から、スコア上位n銘柄を算出する(参考情報であり投資助言ではない)。"""
+MARKET_SEGMENTS = ["プライム", "スタンダード", "グロース"]
+
+
+def select_top_promising_by_market(n_per_market: int = 10, period: str = "6mo") -> dict[str, list[PromisingStock]]:
+    """市場区分(プライム/スタンダード/グロース)ごとに、対象ユニバースからスコア上位n_per_market銘柄を算出する。
+
+    参考情報であり投資助言ではない。市場区分の少ない銘柄(スタンダード/グロース)は
+    候補数自体が少ないため、n_per_market件に満たない場合がある。
+    """
     universe = load_universe()
     codes = universe["code"].tolist()
     names = dict(zip(universe["code"], universe["name"]))
+    markets = dict(zip(universe["code"], universe["market"]))
 
     histories = fetch_price_history_batch(codes, period=period)
 
-    scored: list[PromisingStock] = []
+    scored_by_market: dict[str, list[PromisingStock]] = {}
     for code, raw_df in histories.items():
         df = compute_indicators(raw_df)
         score = score_stock(df)
@@ -360,7 +368,11 @@ def select_top_promising(n: int = 10, period: str = "6mo") -> list[PromisingStoc
             f"直近の売買代金(20日平均比): {turnover_text}",
             f"直近5営業日騰落率: {recent_return:+.1f}%",
         ]
-        scored.append(PromisingStock(code=code, name=names.get(code, code), score=score, reasons=reasons))
+        stock = PromisingStock(code=code, name=names.get(code, code), score=score, reasons=reasons)
+        market = markets.get(code, "不明")
+        scored_by_market.setdefault(market, []).append(stock)
 
-    scored.sort(key=lambda s: s.score, reverse=True)
-    return scored[:n]
+    for stocks in scored_by_market.values():
+        stocks.sort(key=lambda s: s.score, reverse=True)
+
+    return {market: stocks[:n_per_market] for market, stocks in scored_by_market.items()}
