@@ -1,4 +1,4 @@
-"""株の売り時判断ダッシュボード(東証銘柄向け)。"""
+"""株の売り時・買い時判断ダッシュボード(東証銘柄向け)。"""
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -33,9 +33,9 @@ def zone_segments(levels: pd.Series) -> list[tuple]:
     return [(group.index[0], group.index[-1], group.iloc[0]) for _, group in valid.groupby(group_id)]
 
 
-st.set_page_config(page_title="売り時判断ダッシュボード", layout="wide")
+st.set_page_config(page_title="売り時・買い時判断ダッシュボード", layout="wide")
 
-st.title("株の売り時判断ダッシュボード")
+st.title("株の売り時・買い時判断ダッシュボード")
 st.caption(f"株価が{MA_SHORT_WINDOW}日移動平均線を下抜けたタイミングから売り時の目安を表示します。投資助言ではありません。")
 
 LEVEL_ICON = {"強": "🔴", "なし": "🟢", "判定不可": "⚪"}
