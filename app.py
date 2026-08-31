@@ -5,20 +5,19 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from stock_signals import (
+    BUY_ZONE_ORDER,
     MA_LONG_WINDOW,
     MA_SHORT_WINDOW,
-    SIGNAL_LEVEL_ORDER,
     TURNOVER_MA_WINDOW,
     buy_and_hold_return,
     compute_buy_zone_levels,
     compute_indicators,
-    compute_signal_levels,
-    evaluate_sell_signal,
+    evaluate_buy_zone,
     fetch_company_name,
     fetch_price_history,
     parse_watchlist_codes,
     select_top_promising,
-    simulate_sell_strategy,
+    simulate_buy_zone_strategy,
 )
 
 ZONE_COLOR = {"買い時": "rgba(220, 53, 69, 0.18)", "様子見": "rgba(255, 193, 7, 0.18)"}
@@ -36,10 +35,10 @@ def zone_segments(levels: pd.Series) -> list[tuple]:
 st.set_page_config(page_title="売り時・買い時判断ダッシュボード", layout="wide")
 
 st.title("株の売り時・買い時判断ダッシュボード")
-st.caption(f"株価が{MA_SHORT_WINDOW}日移動平均線を下抜けたタイミングから売り時の目安を表示します。投資助言ではありません。")
+st.caption(f"株価が{MA_SHORT_WINDOW}日移動平均線より上か下かをもとに、買い時/様子見の目安を表示します。投資助言ではありません。")
 
-LEVEL_ICON = {"強": "🔴", "なし": "🟢", "判定不可": "⚪"}
-LEVEL_LABEL = {"強": "売", "なし": "なし", "判定不可": "判定不可"}
+LEVEL_ICON = {"買い時": "🔴", "様子見": "🟡", "判定不可": "⚪"}
+LEVEL_LABEL = {"買い時": "買い時", "様子見": "様子見", "判定不可": "判定不可"}
 
 
 @st.cache_data(ttl=600)
@@ -67,8 +66,6 @@ with st.sidebar:
     st.button("表示する")
 
     st.markdown("---")
-    st.markdown("**売りと判断する条件**")
-    st.markdown(f"- 前日終値が{MA_SHORT_WINDOW}日移動平均線の上にあり、本日終値が下回った(下抜けの瞬間)")
     st.markdown("**買い時/様子見の条件**")
     st.markdown(f"- 終値が{MA_SHORT_WINDOW}日移動平均線より上: 買い時(チャート背景:赤)")
     st.markdown(f"- 終値が{MA_SHORT_WINDOW}日移動平均線より下: 様子見(チャート背景:黄色)")
@@ -97,7 +94,7 @@ def render_watchlist_tab(raw_codes: str, period: str) -> None:
         try:
             df = load_price_history(code, period)
             df = compute_indicators(df)
-            signal = evaluate_sell_signal(df)
+            signal = evaluate_buy_zone(df)
         except Exception as e:
             st.warning(f"{code}: {e}")
             continue
@@ -112,7 +109,7 @@ def render_watchlist_tab(raw_codes: str, period: str) -> None:
                 "最新終値": round(float(df["Close"].iloc[-1]), 1),
                 "シグナル": f"{LEVEL_ICON.get(signal.level, '')} {LEVEL_LABEL.get(signal.level, signal.level)}",
                 "主な理由": signal.reasons[0] if signal.reasons else "",
-                "_order": SIGNAL_LEVEL_ORDER.get(signal.level, 99),
+                "_order": BUY_ZONE_ORDER.get(signal.level, 99),
             }
         )
 
@@ -126,7 +123,7 @@ def render_watchlist_tab(raw_codes: str, period: str) -> None:
     st.subheader("銘柄ごとの詳細")
     for i, code in enumerate(summary_df["証券コード"].tolist()):
         df, signal = details[code]
-        header = f"{LEVEL_ICON.get(signal.level, '')} {code} {names[code]}  売り検討シグナル: {LEVEL_LABEL.get(signal.level, signal.level)}"
+        header = f"{LEVEL_ICON.get(signal.level, '')} {code} {names[code]}  シグナル: {LEVEL_LABEL.get(signal.level, signal.level)}"
         with st.expander(header, expanded=(i == 0)):
             for reason in signal.reasons:
                 st.write(f"- {reason}")
@@ -144,19 +141,6 @@ def render_watchlist_tab(raw_codes: str, period: str) -> None:
             price_fig.add_trace(
                 go.Scatter(x=df.index, y=df["ma_long"], name=f"{MA_LONG_WINDOW}日移動平均", line=dict(width=1))
             )
-
-            levels = compute_signal_levels(df)
-            sell_dates = df.index[levels == "強"]
-            if len(sell_dates) > 0:
-                price_fig.add_trace(
-                    go.Scatter(
-                        x=sell_dates,
-                        y=df.loc[sell_dates, "High"] * 1.02,
-                        mode="markers",
-                        marker=dict(symbol="triangle-down", size=11, color="black"),
-                        name="売りシグナル",
-                    )
-                )
 
             buy_zone_levels = compute_buy_zone_levels(df)
             for start, end, state in zone_segments(buy_zone_levels):
@@ -180,7 +164,7 @@ def render_watchlist_tab(raw_codes: str, period: str) -> None:
             st.plotly_chart(price_fig, width="stretch", key=f"price_{code}")
             st.caption(
                 f"背景色は終値と{MA_SHORT_WINDOW}日移動平均線の位置関係を表します"
-                "(買い時=赤、様子見=黄色)。売り検討シグナル(▼マーク)とは別の判定です。"
+                "(買い時=赤、様子見=黄色)。"
             )
 
             turnover_fig = go.Figure()
@@ -200,11 +184,11 @@ def render_watchlist_tab(raw_codes: str, period: str) -> None:
 
             st.markdown("**過去データでのシミュレーション**")
             st.caption(
-                "シグナルが「強」になった日に売り、「なし」に戻った次の営業日に買い直すルールで計算した"
+                "「買い時」になった日に買い、「様子見」になった日に売るルールで計算した"
                 "参考値です。手数料・税金は考慮しておらず、将来の成果を保証するものではありません。"
             )
 
-            trades = simulate_sell_strategy(df)
+            trades = simulate_buy_zone_strategy(df)
             hold_return = buy_and_hold_return(df)
 
             sim_multiplier = 1.0

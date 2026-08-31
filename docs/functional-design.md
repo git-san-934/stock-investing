@@ -15,8 +15,8 @@ graph LR
 
 ### 1. ウォッチリスト入力・一覧表示機能
 * サイドバーで証券コードを複数(最大50件)まとめて入力する(カンマまたは改行区切り)
-* 入力されたコードごとに `stock_signals.py` の関数を呼び出し、シグナルを算出する
-* 全銘柄のシグナルをメイン画面上部の一覧テーブルにまとめ、シグナルの強い順に並び替えて表示する
+* 入力されたコードごとに `stock_signals.py` の関数を呼び出し、買い時/様子見シグナルを算出する
+* 全銘柄のシグナルをメイン画面上部の一覧テーブルにまとめ、買い時の銘柄が上位に来るよう並び替えて表示する
 * 一部銘柄の取得に失敗しても、その銘柄のみエラー表示とし、他銘柄の一覧表示は継続する
 
 ### 2. 銘柄詳細表示機能
@@ -35,7 +35,7 @@ classDiagram
         +DataFrame ohlcv
         +str symbol
     }
-    class SellSignal {
+    class BuyZoneStatus {
         +str level
         +list~str~ reasons
     }
@@ -43,16 +43,16 @@ classDiagram
         +str code
         +str symbol
         +float latest_close
-        +SellSignal signal
+        +BuyZoneStatus signal
     }
     WatchlistInput "1" --> "0..10" WatchlistItem : 生成
     WatchlistItem --> PriceHistory : 参照
-    WatchlistItem --> SellSignal : 保持
+    WatchlistItem --> BuyZoneStatus : 保持
 ```
 
 * `WatchlistInput.codes`: ユーザー入力を分割・トリム・重複除去した証券コードのリスト(最大50件)。上限超過時はUI上でエラーメッセージを表示する。
 * `PriceHistory`: `stock_signals.fetch_price_history` で取得したOHLCVデータフレームに、`compute_indicators` で算出した列(売買代金・移動平均等)を追加したもの。
-* `SellSignal`: 既存の `stock_signals.SellSignal` データクラス(level, reasons)。
+* `BuyZoneStatus`: `stock_signals.BuyZoneStatus` データクラス(level: 買い時/様子見/判定不可, reasons)。
 * `WatchlistItem`: 一覧表示用に、銘柄コードと最新終値・シグナルをまとめたサマリー。
 
 ## コンポーネント設計
@@ -61,10 +61,10 @@ classDiagram
 * **app.py(UI層)**
   * サイドバー: 複数コード入力欄、表示期間選択
   * 入力コードごとに `stock_signals` の関数をループ呼び出しし、`WatchlistItem` 相当のサマリーリストを組み立てる
-  * ウォッチリスト一覧テーブルの描画(シグナル強い順)
+  * ウォッチリスト一覧テーブルの描画(買い時の銘柄が上位)
   * 選択銘柄の詳細チャート描画(既存のチャート描画ロジックを流用)
 * **stock_signals.py(データ・ロジック層)**
-  * `to_ticker_symbol` / `fetch_price_history` / `compute_indicators` / `evaluate_sell_signal`(既存、変更なし)
+  * `to_ticker_symbol` / `fetch_price_history` / `compute_indicators` / `evaluate_buy_zone`
   * 複数銘柄対応のため、これらの関数は1銘柄ずつ呼び出される前提のまま維持する(ループ制御はapp.py側が担う)
 
 ## ユースケース図
@@ -95,8 +95,8 @@ graph TD
 │ サイドバー          │ メイン画面              │
 │ ┌─────────────┐ │ 【ウォッチリスト】          │
 │ │証券コード入力  │ │ コード┃銘柄名┃シグナル┃終値 │
-│ │(最大50件)    │ │ 7203 ┃...   ┃ 強    ┃... │
-│ │             │ │ 9984 ┃...   ┃ なし  ┃... │
+│ │(最大50件)    │ │ 7203 ┃...   ┃ 買い時 ┃... │
+│ │             │ │ 9984 ┃...   ┃ 様子見 ┃... │
 │ │表示期間選択    │ │  :                     │
 │ │             │ │                         │
 │ │[表示する]     │ │ 【銘柄詳細: 選択中コード】  │

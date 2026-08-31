@@ -5,7 +5,7 @@
 ### 命名規則
 * 変数・関数名: `snake_case`(例: `fetch_price_history`, `turnover_ratio`)
 * 定数: `UPPER_SNAKE_CASE`(例: `TURNOVER_SPIKE_RATIO`, `MA_SHORT_WINDOW`)。マジックナンバーは直接コード中に書かず、モジュール冒頭で定数化する。
-* クラス・データクラス: `PascalCase`(例: `SellSignal`)
+* クラス・データクラス: `PascalCase`(例: `BuyZoneStatus`)
 * 証券コード関連の変数名は `code`(ユーザー入力の生の証券コード)と `symbol`(yfinance用に変換済みのシンボル、`.T`付き)を区別して使う
 
 ### スタイリング規約
@@ -18,8 +18,8 @@
 ### テスト規約
 * テストフレームワークには `pytest` を使用する
 * テストファイルはルート直下の `tests/` ディレクトリに置き、対象モジュールに対応させる(例: `stock_signals.py` → `tests/test_stock_signals.py`)
-* テスト関数名は `test_<対象関数>_<条件・期待結果>` の形式とする(例: `test_evaluate_sell_signal_turnover_spike_near_high_returns_strong`)
-* ネットワークアクセス(yfinance呼び出し)を伴うテストは、実データではなくダミーのDataFrameを用いて `compute_indicators` / `evaluate_sell_signal` などの純粋なロジック部分を検証する
+* テスト関数名は `test_<対象関数>_<条件・期待結果>` の形式とする(例: `test_evaluate_buy_zone_close_above_ma_returns_buy`)
+* ネットワークアクセス(yfinance呼び出し)を伴うテストは、実データではなくダミーのDataFrameを用いて `compute_indicators` / `evaluate_buy_zone` などの純粋なロジック部分を検証する
 * 実装当初はテスト未整備の状態からスタートしてよいが、`stock_signals.py` にロジックを追加・変更する際はテストの追加を検討する
 
 ### Git規約

@@ -1,4 +1,4 @@
-"""売買代金と株価チャートをもとに売り時シグナルを計算するモジュール。"""
+"""売買代金と株価チャートをもとに買い時/様子見シグナルを計算するモジュール。"""
 
 import re
 from dataclasses import dataclass
@@ -10,9 +10,6 @@ import yfinance as yf
 TURNOVER_MA_WINDOW = 20
 MA_SHORT_WINDOW = 25
 MA_LONG_WINDOW = 75
-
-# シグナルレベルの並び順(値が小さいほど強い)。ウォッチリストのソートに使う。
-SIGNAL_LEVEL_ORDER = {"強": 0, "なし": 1, "判定不可": 2}
 
 
 def parse_watchlist_codes(raw_text: str, max_codes: int = 50) -> list[str]:
@@ -163,40 +160,34 @@ def compute_indicators(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+BUY_ZONE_ORDER = {"買い時": 0, "様子見": 1, "判定不可": 2}
+
+
 @dataclass
-class SellSignal:
-    level: str  # "強" | "なし" | "判定不可"
+class BuyZoneStatus:
+    level: str  # "買い時" | "様子見" | "判定不可"
     reasons: list[str]
 
 
-# 判定条件はcompute_signal_levelsと同じものを使っている。判定条件を変えるときは両方直すこと。
-def evaluate_sell_signal(df: pd.DataFrame) -> SellSignal:
-    if len(df) < MA_SHORT_WINDOW + 1:
-        return SellSignal(level="判定不可", reasons=["データ期間が不足しています"])
+def evaluate_buy_zone(df: pd.DataFrame) -> BuyZoneStatus:
+    """最新日について、終値と25日移動平均線の位置関係から「買い時」「様子見」を判定する。
+
+    判定条件はcompute_buy_zone_levelsと同じものを使っている。判定条件を変えるときは両方直すこと。
+    """
+    if len(df) < MA_SHORT_WINDOW + 1 or pd.isna(df["ma_short"].iloc[-1]):
+        return BuyZoneStatus(level="判定不可", reasons=["データ期間が不足しています"])
 
     latest = df.iloc[-1]
-    prev = df.iloc[-2]
-
-    crossed_below = bool(prev["Close"] >= prev["ma_short"] and latest["Close"] < latest["ma_short"])
-    if crossed_below:
-        return SellSignal(
-            level="強",
-            reasons=[f"前日は{MA_SHORT_WINDOW}日移動平均線の上にあった株価が、本日下回りました"],
+    if latest["Close"] > latest["ma_short"]:
+        return BuyZoneStatus(
+            level="買い時",
+            reasons=[f"終値が{MA_SHORT_WINDOW}日移動平均線より上にあります"],
         )
 
-    return SellSignal(level="なし", reasons=["現時点で売り検討シグナルはありません"])
-
-
-# 判定条件はevaluate_sell_signalと同じものを使っている。判定条件を変えるときは両方直すこと。
-def compute_signal_levels(df: pd.DataFrame) -> pd.Series:
-    """バックテスト用に、全営業日ごとの売り検討シグナルレベルを算出する。"""
-    prev_close = df["Close"].shift(1)
-    prev_ma_short = df["ma_short"].shift(1)
-    crossed_below = (prev_close >= prev_ma_short) & (df["Close"] < df["ma_short"])
-
-    levels = pd.Series("なし", index=df.index)
-    levels[crossed_below.fillna(False)] = "強"
-    return levels
+    return BuyZoneStatus(
+        level="様子見",
+        reasons=[f"終値が{MA_SHORT_WINDOW}日移動平均線より下にあります"],
+    )
 
 
 @dataclass
@@ -209,37 +200,33 @@ class Trade:
     is_open: bool  # True: 期間終了時点でまだ保有中(含み損益)
 
 
-def simulate_sell_strategy(df: pd.DataFrame, sell_levels: tuple[str, ...] = ("強",)) -> list[Trade]:
-    """シグナルに従って売買していた場合の簡易シミュレーションを行う(参考値、投資助言ではない)。
+def simulate_buy_zone_strategy(df: pd.DataFrame) -> list[Trade]:
+    """買い時/様子見の状態に従って売買していた場合の簡易シミュレーションを行う(参考値、投資助言ではない)。
 
-    ルール: 期間最初の営業日の終値で買う → シグナルがsell_levelsに該当した日の終値で売る
-    → シグナルが「なし」に戻った次の営業日の終値で買い直す → 期間終了時点で保有中なら含み損益として計上する。
-    手数料・税金は考慮しない。
+    ルール: 「買い時」になった日の終値で買う → 「様子見」になった日の終値で売る、を繰り返す。
+    期間終了時点で保有中なら含み損益として計上する。手数料・税金は考慮しない。
     """
-    levels = compute_signal_levels(df)
+    levels = compute_buy_zone_levels(df)
 
     trades: list[Trade] = []
-    holding = True
-    waiting_to_reenter = False
-    entry_date = df.index[0]
-    entry_price = float(df["Close"].iloc[0])
+    holding = False
+    entry_date: pd.Timestamp | None = None
+    entry_price = 0.0
 
     for date, level in levels.items():
-        if date == entry_date:
+        if pd.isna(level):
             continue
 
         price = float(df.loc[date, "Close"])
 
-        if holding and level in sell_levels:
+        if level == "買い時" and not holding:
+            holding = True
+            entry_date = date
+            entry_price = price
+        elif level == "様子見" and holding:
             return_pct = (price - entry_price) / entry_price * 100
             trades.append(Trade(entry_date, entry_price, date, price, return_pct, is_open=False))
             holding = False
-            waiting_to_reenter = True
-        elif waiting_to_reenter and level == "なし":
-            entry_date = date
-            entry_price = price
-            holding = True
-            waiting_to_reenter = False
 
     if holding:
         last_date = df.index[-1]
@@ -260,8 +247,7 @@ def buy_and_hold_return(df: pd.DataFrame) -> float:
 def compute_buy_zone_levels(df: pd.DataFrame) -> pd.Series:
     """終値と25日移動平均線の位置関係から、日ごとの「買い時」「様子見」状態を算出する。
 
-    既存の売り検討シグナル(evaluate_sell_signal、前日比のクロス検知)とは別の
-    独立したロジックであり、判定条件を変える際もこちらだけを直せばよい。
+    判定条件はevaluate_buy_zoneと同じものを使っている。判定条件を変えるときは両方直すこと。
     """
     levels = pd.Series(pd.NA, index=df.index, dtype="object")
     valid = df["ma_short"].notna()
