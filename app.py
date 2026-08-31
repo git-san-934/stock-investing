@@ -43,7 +43,7 @@ with st.sidebar:
         value="7203\n9984\n6758",
         help="例: トヨタ自動車なら 7203。複数銘柄はカンマまたは改行で区切ってください。",
     )
-    period = st.selectbox("表示期間", ["6mo", "1y", "2y"], index=1)
+    period = st.selectbox("表示期間", ["6mo", "1y", "2y", "10y"], index=1)
     st.button("表示する")
 
     st.markdown("---")
@@ -123,7 +123,7 @@ for i, code in enumerate(summary_df["証券コード"].tolist()):
                     x=sell_dates,
                     y=df.loc[sell_dates, "High"] * 1.02,
                     mode="markers",
-                    marker=dict(symbol="triangle-down", size=11, color="red"),
+                    marker=dict(symbol="triangle-down", size=11, color="black"),
                     name="売りシグナル",
                 )
             )
