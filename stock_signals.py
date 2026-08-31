@@ -2,6 +2,7 @@
 
 import re
 from dataclasses import dataclass
+from pathlib import Path
 
 import pandas as pd
 import yfinance as yf
@@ -254,3 +255,114 @@ def buy_and_hold_return(df: pd.DataFrame) -> float:
     first_price = float(df["Close"].iloc[0])
     last_price = float(df["Close"].iloc[-1])
     return (last_price - first_price) / first_price * 100
+
+
+def compute_buy_zone_levels(df: pd.DataFrame) -> pd.Series:
+    """終値と25日移動平均線の位置関係から、日ごとの「買い時」「様子見」状態を算出する。
+
+    既存の売り検討シグナル(evaluate_sell_signal、前日比のクロス検知)とは別の
+    独立したロジックであり、判定条件を変える際もこちらだけを直せばよい。
+    """
+    levels = pd.Series(pd.NA, index=df.index, dtype="object")
+    valid = df["ma_short"].notna()
+    levels[valid & (df["Close"] > df["ma_short"])] = "買い時"
+    levels[valid & (df["Close"] <= df["ma_short"])] = "様子見"
+    return levels
+
+
+UNIVERSE_CSV_PATH = Path(__file__).parent / "data" / "tse_universe.csv"
+
+
+def load_universe() -> pd.DataFrame:
+    """AI銘柄選定の対象ユニバース(data/tse_universe.csv)を読み込む。
+
+    東証全銘柄(約3,900件)を網羅したものではなく、主要銘柄を中心とした静的リストである。
+    """
+    return pd.read_csv(UNIVERSE_CSV_PATH, dtype={"code": str})
+
+
+def fetch_price_history_batch(codes: list[str], period: str = "6mo") -> dict[str, pd.DataFrame]:
+    """複数銘柄の株価データをまとめて取得する(1銘柄ずつ取得するより通信回数を抑える)。
+
+    取得できなかった(データが空の)銘柄は結果に含めない。
+    """
+    symbols = [to_ticker_symbol(code) for code in codes]
+    raw = yf.download(symbols, period=period, group_by="ticker", progress=False, threads=True)
+
+    result: dict[str, pd.DataFrame] = {}
+    for code, symbol in zip(codes, symbols):
+        try:
+            df = raw[symbol] if len(symbols) > 1 else raw
+        except KeyError:
+            continue
+        df = df.dropna(how="all")
+        if df.empty:
+            continue
+        result[code] = df
+    return result
+
+
+@dataclass
+class PromisingStock:
+    code: str
+    name: str
+    score: float
+    reasons: list[str]
+
+
+def score_stock(df: pd.DataFrame) -> float | None:
+    """テクニカル指標を組み合わせて「今買うと有望か」を表すスコアを算出する(参考値、投資助言ではない)。
+
+    スコアが高いほど有望と判定する。データ不足で指標が算出できない場合はNoneを返す。
+    構成: 25日移動平均線からの上方乖離率 + ゴールデンクロス状態 + 売買代金の増加度合い + 直近5営業日騰落率。
+    """
+    if len(df) < MA_LONG_WINDOW + 5:
+        return None
+
+    latest = df.iloc[-1]
+    if pd.isna(latest["ma_short"]) or pd.isna(latest["ma_long"]):
+        return None
+
+    ma_short_deviation = (latest["Close"] - latest["ma_short"]) / latest["ma_short"] * 100
+    golden_cross = 1.0 if latest["ma_short"] > latest["ma_long"] else 0.0
+    turnover_ratio = float(latest["turnover_ratio"]) if pd.notna(latest["turnover_ratio"]) else 1.0
+    recent_return = (latest["Close"] - df["Close"].iloc[-6]) / df["Close"].iloc[-6] * 100
+
+    return float(
+        ma_short_deviation * 1.0
+        + golden_cross * 5.0
+        + (turnover_ratio - 1.0) * 3.0
+        + recent_return * 0.5
+    )
+
+
+def select_top_promising(n: int = 10, period: str = "6mo") -> list[PromisingStock]:
+    """対象ユニバースの中から、スコア上位n銘柄を算出する(参考情報であり投資助言ではない)。"""
+    universe = load_universe()
+    codes = universe["code"].tolist()
+    names = dict(zip(universe["code"], universe["name"]))
+
+    histories = fetch_price_history_batch(codes, period=period)
+
+    scored: list[PromisingStock] = []
+    for code, raw_df in histories.items():
+        df = compute_indicators(raw_df)
+        score = score_stock(df)
+        if score is None:
+            continue
+
+        latest = df.iloc[-1]
+        turnover_text = (
+            f"{latest['turnover_ratio']:.2f}倍" if pd.notna(latest["turnover_ratio"]) else "算出不可"
+        )
+        recent_return = (latest["Close"] - df["Close"].iloc[-6]) / df["Close"].iloc[-6] * 100
+        reasons = [
+            f"25日移動平均線からの乖離率: {(latest['Close'] - latest['ma_short']) / latest['ma_short'] * 100:+.1f}%",
+            f"ゴールデンクロス状態(25日線>75日線): {'はい' if latest['ma_short'] > latest['ma_long'] else 'いいえ'}",
+            f"直近の売買代金(20日平均比): {turnover_text}",
+            f"直近5営業日騰落率: {recent_return:+.1f}%",
+        ]
+        scored.append(PromisingStock(code=code, name=names.get(code, code), score=score, reasons=reasons))
+
+    scored.sort(key=lambda s: s.score, reverse=True)
+    return scored[:n]

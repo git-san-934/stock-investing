@@ -10,14 +10,28 @@ from stock_signals import (
     SIGNAL_LEVEL_ORDER,
     TURNOVER_MA_WINDOW,
     buy_and_hold_return,
+    compute_buy_zone_levels,
     compute_indicators,
     compute_signal_levels,
     evaluate_sell_signal,
     fetch_company_name,
     fetch_price_history,
     parse_watchlist_codes,
+    select_top_promising,
     simulate_sell_strategy,
 )
+
+ZONE_COLOR = {"買い時": "rgba(46, 139, 87, 0.15)", "様子見": "rgba(120, 120, 120, 0.12)"}
+
+
+def zone_segments(levels: pd.Series) -> list[tuple]:
+    """状態が連続する区間ごとに (開始日, 終了日, 状態) のタプルを返す(未算出の区間は除く)。"""
+    valid = levels.dropna()
+    if valid.empty:
+        return []
+    group_id = valid.ne(valid.shift()).cumsum()
+    return [(group.index[0], group.index[-1], group.iloc[0]) for _, group in valid.groupby(group_id)]
+
 
 st.set_page_config(page_title="売り時判断ダッシュボード", layout="wide")
 
@@ -38,6 +52,11 @@ def load_company_name(code: str) -> str:
     return fetch_company_name(code)
 
 
+@st.cache_data(ttl=86400)
+def load_top_promising(n: int, period: str):
+    return select_top_promising(n=n, period=period)
+
+
 with st.sidebar:
     raw_codes = st.text_area(
         "証券コード(最大50件、改行またはカンマ区切り)",
@@ -50,130 +69,213 @@ with st.sidebar:
     st.markdown("---")
     st.markdown("**売りと判断する条件**")
     st.markdown(f"- 前日終値が{MA_SHORT_WINDOW}日移動平均線の上にあり、本日終値が下回った(下抜けの瞬間)")
+    st.markdown("**買い時/様子見の条件**")
+    st.markdown(f"- 終値が{MA_SHORT_WINDOW}日移動平均線より上: 買い時")
+    st.markdown(f"- 終値が{MA_SHORT_WINDOW}日移動平均線より下: 様子見")
 
-try:
-    codes = parse_watchlist_codes(raw_codes)
-except ValueError as e:
-    st.error(str(e))
-    st.stop()
 
-if not codes:
-    st.info("証券コードを入力してください。")
-    st.stop()
+def render_watchlist_tab(raw_codes: str, period: str) -> None:
+    """「ウォッチリスト」タブの内容を描画する。
 
-summaries = []
-details = {}
-names = {}
-for code in codes:
+    st.stop()はスクリプト全体を止めてしまい他のタブが描画されなくなるため使わず、
+    早期returnで打ち切る(このタブの描画のみをスキップする)。
+    """
     try:
-        df = load_price_history(code, period)
-        df = compute_indicators(df)
-        signal = evaluate_sell_signal(df)
-    except Exception as e:
-        st.warning(f"{code}: {e}")
-        continue
+        codes = parse_watchlist_codes(raw_codes)
+    except ValueError as e:
+        st.error(str(e))
+        return
 
-    name = load_company_name(code)
-    details[code] = (df, signal)
-    names[code] = name
-    summaries.append(
-        {
-            "証券コード": code,
-            "銘柄名": name,
-            "最新終値": round(float(df["Close"].iloc[-1]), 1),
-            "シグナル": f"{LEVEL_ICON.get(signal.level, '')} {LEVEL_LABEL.get(signal.level, signal.level)}",
-            "主な理由": signal.reasons[0] if signal.reasons else "",
-            "_order": SIGNAL_LEVEL_ORDER.get(signal.level, 99),
-        }
-    )
+    if not codes:
+        st.info("証券コードを入力してください。")
+        return
 
-if not summaries:
-    st.stop()
+    summaries = []
+    details = {}
+    names = {}
+    for code in codes:
+        try:
+            df = load_price_history(code, period)
+            df = compute_indicators(df)
+            signal = evaluate_sell_signal(df)
+        except Exception as e:
+            st.warning(f"{code}: {e}")
+            continue
 
-summary_df = pd.DataFrame(summaries).sort_values("_order").drop(columns="_order")
-st.subheader("ウォッチリスト")
-st.dataframe(summary_df, width="stretch", hide_index=True)
-
-st.subheader("銘柄ごとの詳細")
-for i, code in enumerate(summary_df["証券コード"].tolist()):
-    df, signal = details[code]
-    header = f"{LEVEL_ICON.get(signal.level, '')} {code} {names[code]}  売り検討シグナル: {LEVEL_LABEL.get(signal.level, signal.level)}"
-    with st.expander(header, expanded=(i == 0)):
-        for reason in signal.reasons:
-            st.write(f"- {reason}")
-
-        price_fig = go.Figure()
-        price_fig.add_trace(
-            go.Candlestick(
-                x=df.index, open=df["Open"], high=df["High"], low=df["Low"], close=df["Close"],
-                name="株価",
-            )
-        )
-        price_fig.add_trace(
-            go.Scatter(x=df.index, y=df["ma_short"], name=f"{MA_SHORT_WINDOW}日移動平均", line=dict(width=1))
-        )
-        price_fig.add_trace(
-            go.Scatter(x=df.index, y=df["ma_long"], name=f"{MA_LONG_WINDOW}日移動平均", line=dict(width=1))
+        name = load_company_name(code)
+        details[code] = (df, signal)
+        names[code] = name
+        summaries.append(
+            {
+                "証券コード": code,
+                "銘柄名": name,
+                "最新終値": round(float(df["Close"].iloc[-1]), 1),
+                "シグナル": f"{LEVEL_ICON.get(signal.level, '')} {LEVEL_LABEL.get(signal.level, signal.level)}",
+                "主な理由": signal.reasons[0] if signal.reasons else "",
+                "_order": SIGNAL_LEVEL_ORDER.get(signal.level, 99),
+            }
         )
 
-        levels = compute_signal_levels(df)
-        sell_dates = df.index[levels == "強"]
-        if len(sell_dates) > 0:
+    if not summaries:
+        return
+
+    summary_df = pd.DataFrame(summaries).sort_values("_order").drop(columns="_order")
+    st.subheader("ウォッチリスト")
+    st.dataframe(summary_df, width="stretch", hide_index=True)
+
+    st.subheader("銘柄ごとの詳細")
+    for i, code in enumerate(summary_df["証券コード"].tolist()):
+        df, signal = details[code]
+        header = f"{LEVEL_ICON.get(signal.level, '')} {code} {names[code]}  売り検討シグナル: {LEVEL_LABEL.get(signal.level, signal.level)}"
+        with st.expander(header, expanded=(i == 0)):
+            for reason in signal.reasons:
+                st.write(f"- {reason}")
+
+            price_fig = go.Figure()
             price_fig.add_trace(
-                go.Scatter(
-                    x=sell_dates,
-                    y=df.loc[sell_dates, "High"] * 1.02,
-                    mode="markers",
-                    marker=dict(symbol="triangle-down", size=11, color="black"),
-                    name="売りシグナル",
+                go.Candlestick(
+                    x=df.index, open=df["Open"], high=df["High"], low=df["Low"], close=df["Close"],
+                    name="株価",
                 )
             )
+            price_fig.add_trace(
+                go.Scatter(x=df.index, y=df["ma_short"], name=f"{MA_SHORT_WINDOW}日移動平均", line=dict(width=1))
+            )
+            price_fig.add_trace(
+                go.Scatter(x=df.index, y=df["ma_long"], name=f"{MA_LONG_WINDOW}日移動平均", line=dict(width=1))
+            )
 
-        price_fig.update_layout(title="株価チャート", xaxis_rangeslider_visible=False, height=450)
-        st.plotly_chart(price_fig, width="stretch", key=f"price_{code}")
+            levels = compute_signal_levels(df)
+            sell_dates = df.index[levels == "強"]
+            if len(sell_dates) > 0:
+                price_fig.add_trace(
+                    go.Scatter(
+                        x=sell_dates,
+                        y=df.loc[sell_dates, "High"] * 1.02,
+                        mode="markers",
+                        marker=dict(symbol="triangle-down", size=11, color="black"),
+                        name="売りシグナル",
+                    )
+                )
 
-        turnover_fig = go.Figure()
-        turnover_fig.add_trace(go.Bar(x=df.index, y=df["turnover"], name="売買代金"))
-        turnover_fig.add_trace(
-            go.Scatter(x=df.index, y=df["turnover_ma"], name=f"{TURNOVER_MA_WINDOW}日平均売買代金", line=dict(width=1))
-        )
-        turnover_fig.update_layout(title="売買代金", height=300)
-        st.plotly_chart(turnover_fig, width="stretch", key=f"turnover_{code}")
+            buy_zone_levels = compute_buy_zone_levels(df)
+            for start, end, state in zone_segments(buy_zone_levels):
+                price_fig.add_vrect(
+                    x0=start,
+                    x1=end + pd.Timedelta(days=1),
+                    fillcolor=ZONE_COLOR[state],
+                    line_width=0,
+                    layer="below",
+                )
+            for state, color in ZONE_COLOR.items():
+                price_fig.add_trace(
+                    go.Scatter(
+                        x=[None], y=[None], mode="markers",
+                        marker=dict(size=10, color=color, symbol="square"),
+                        name=state,
+                    )
+                )
 
-        display_columns = ["Close", "Volume", "turnover", "turnover_ratio", "ma_short", "ma_long"]
-        st.dataframe(
-            df.tail(20)[display_columns].sort_index(ascending=False),
-            width="stretch",
-            key=f"table_{code}",
-        )
+            price_fig.update_layout(title="株価チャート", xaxis_rangeslider_visible=False, height=450)
+            st.plotly_chart(price_fig, width="stretch", key=f"price_{code}")
+            st.caption(
+                f"背景色は終値と{MA_SHORT_WINDOW}日移動平均線の位置関係を表します"
+                "(買い時=淡いグリーン、様子見=淡いグレー)。売り検討シグナル(▼マーク)とは別の判定です。"
+            )
 
-        st.markdown("**過去データでのシミュレーション**")
-        st.caption(
-            "シグナルが「強」になった日に売り、「なし」に戻った次の営業日に買い直すルールで計算した"
-            "参考値です。手数料・税金は考慮しておらず、将来の成果を保証するものではありません。"
-        )
+            turnover_fig = go.Figure()
+            turnover_fig.add_trace(go.Bar(x=df.index, y=df["turnover"], name="売買代金"))
+            turnover_fig.add_trace(
+                go.Scatter(x=df.index, y=df["turnover_ma"], name=f"{TURNOVER_MA_WINDOW}日平均売買代金", line=dict(width=1))
+            )
+            turnover_fig.update_layout(title="売買代金", height=300)
+            st.plotly_chart(turnover_fig, width="stretch", key=f"turnover_{code}")
 
-        trades = simulate_sell_strategy(df)
-        hold_return = buy_and_hold_return(df)
+            display_columns = ["Close", "Volume", "turnover", "turnover_ratio", "ma_short", "ma_long"]
+            st.dataframe(
+                df.tail(20)[display_columns].sort_index(ascending=False),
+                width="stretch",
+                key=f"table_{code}",
+            )
 
-        sim_multiplier = 1.0
-        for trade in trades:
-            sim_multiplier *= 1 + trade.return_pct / 100
-        sim_return = (sim_multiplier - 1) * 100
+            st.markdown("**過去データでのシミュレーション**")
+            st.caption(
+                "シグナルが「強」になった日に売り、「なし」に戻った次の営業日に買い直すルールで計算した"
+                "参考値です。手数料・税金は考慮しておらず、将来の成果を保証するものではありません。"
+            )
 
-        col1, col2 = st.columns(2)
-        col1.metric("シグナル通り売買した場合", f"{sim_return:+.1f}%")
-        col2.metric("ずっと保有し続けた場合(買い持ち)", f"{hold_return:+.1f}%")
+            trades = simulate_sell_strategy(df)
+            hold_return = buy_and_hold_return(df)
 
-        trades_rows = [
-            {
-                "購入日": trade.entry_date.strftime("%Y-%m-%d"),
-                "購入価格": round(trade.entry_price, 1),
-                "売却日": "保有中" if trade.is_open else trade.exit_date.strftime("%Y-%m-%d"),
-                "売却価格": round(trade.exit_price, 1),
-                "損益率": f"{trade.return_pct:+.1f}%",
-                "状態": "含み損益" if trade.is_open else "確定",
-            }
-            for trade in trades
-        ]
-        st.dataframe(pd.DataFrame(trades_rows), width="stretch", hide_index=True, key=f"trades_{code}")
+            sim_multiplier = 1.0
+            for trade in trades:
+                sim_multiplier *= 1 + trade.return_pct / 100
+            sim_return = (sim_multiplier - 1) * 100
+
+            col1, col2 = st.columns(2)
+            col1.metric("シグナル通り売買した場合", f"{sim_return:+.1f}%")
+            col2.metric("ずっと保有し続けた場合(買い持ち)", f"{hold_return:+.1f}%")
+
+            trades_rows = [
+                {
+                    "購入日": trade.entry_date.strftime("%Y-%m-%d"),
+                    "購入価格": round(trade.entry_price, 1),
+                    "売却日": "保有中" if trade.is_open else trade.exit_date.strftime("%Y-%m-%d"),
+                    "売却価格": round(trade.exit_price, 1),
+                    "損益率": f"{trade.return_pct:+.1f}%",
+                    "状態": "含み損益" if trade.is_open else "確定",
+                }
+                for trade in trades
+            ]
+            st.dataframe(pd.DataFrame(trades_rows), width="stretch", hide_index=True, key=f"trades_{code}")
+
+
+def render_promising_tab(period: str) -> None:
+    """「有望銘柄(AI選定)」タブの内容を描画する。"""
+    st.subheader("有望銘柄(AI選定)")
+    st.caption(
+        "対象ユニバース内の銘柄を独自のルールベースでスコアリングし、上位10銘柄を表示します。"
+        "外部AI/LLMは使用していません。投資助言ではなく、あくまで参考情報です。"
+    )
+    st.caption(
+        "対象ユニバースは東証全銘柄(約3,900件)を網羅したものではなく、主要銘柄を中心とした静的リストです。"
+    )
+
+    if st.button("有望銘柄を探索する"):
+        progress = st.progress(0, text="対象銘柄のデータを取得・スコアリング中です…")
+        top_stocks = []
+        try:
+            top_stocks = load_top_promising(10, period)
+        except Exception as e:
+            st.error(f"有望銘柄の算出中にエラーが発生しました: {e}")
+        finally:
+            progress.progress(100, text="完了しました")
+            progress.empty()
+
+        if not top_stocks:
+            st.warning("有望銘柄を算出できませんでした。データ取得状況をご確認ください。")
+        else:
+            ranking_df = pd.DataFrame(
+                [
+                    {"順位": i + 1, "証券コード": s.code, "銘柄名": s.name, "スコア": round(s.score, 2)}
+                    for i, s in enumerate(top_stocks)
+                ]
+            )
+            st.dataframe(ranking_df, width="stretch", hide_index=True)
+
+            st.markdown("**算出根拠**")
+            for i, s in enumerate(top_stocks):
+                with st.expander(f"{i + 1}位 {s.code} {s.name}(スコア: {s.score:.2f})"):
+                    for reason in s.reasons:
+                        st.write(f"- {reason}")
+    else:
+        st.info("ボタンを押すと、対象ユニバース内のデータを取得してスコアリングを実行します(数十秒〜数分かかる場合があります)。")
+
+
+tab_watchlist, tab_promising = st.tabs(["ウォッチリスト", "有望銘柄(AI選定)"])
+
+with tab_watchlist:
+    render_watchlist_tab(raw_codes, period)
+
+with tab_promising:
+    render_promising_tab(period)
