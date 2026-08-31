@@ -270,8 +270,13 @@ def load_universe() -> pd.DataFrame:
     """AI銘柄選定の対象ユニバース(data/tse_universe.csv)を読み込む。
 
     東証全銘柄(約3,900件)を網羅したものではなく、主要銘柄を中心とした静的リストである。
+    Excelで編集・保存するとShift-JIS(cp932)で保存されることが多いため、
+    UTF-8での読み込みに失敗した場合はcp932でフォールバックする。
     """
-    return pd.read_csv(UNIVERSE_CSV_PATH, dtype={"code": str})
+    try:
+        return pd.read_csv(UNIVERSE_CSV_PATH, dtype={"code": str})
+    except UnicodeDecodeError:
+        return pd.read_csv(UNIVERSE_CSV_PATH, dtype={"code": str}, encoding="cp932")
 
 
 def fetch_price_history_batch(codes: list[str], period: str = "6mo") -> dict[str, pd.DataFrame]:
