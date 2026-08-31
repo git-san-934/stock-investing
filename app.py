@@ -102,11 +102,21 @@ def render_watchlist_tab(raw_codes: str, period: str) -> None:
         name = load_company_name(code)
         details[code] = (df, signal)
         names[code] = name
+
+        latest_close = float(df["Close"].iloc[-1])
+        if len(df) >= 2:
+            prev_close = float(df["Close"].iloc[-2])
+            change_pct_text = f"{(latest_close - prev_close) / prev_close * 100:+.1f}%"
+        else:
+            change_pct_text = "-"
+
         summaries.append(
             {
                 "証券コード": code,
                 "銘柄名": name,
-                "最新終値": round(float(df["Close"].iloc[-1]), 1),
+                "最新終値日": df.index[-1].strftime("%Y-%m-%d"),
+                "最新終値": round(latest_close, 1),
+                "前日比": change_pct_text,
                 "シグナル": f"{LEVEL_ICON.get(signal.level, '')} {LEVEL_LABEL.get(signal.level, signal.level)}",
                 "主な理由": signal.reasons[0] if signal.reasons else "",
                 "_order": BUY_ZONE_ORDER.get(signal.level, 99),
