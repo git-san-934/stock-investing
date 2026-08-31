@@ -41,7 +41,7 @@ def load_company_name(code: str) -> str:
 with st.sidebar:
     raw_codes = st.text_area(
         "証券コード(最大50件、改行またはカンマ区切り)",
-        value="285A\n9984\n1329",
+        value="285A,7974,6981,6961,6134,4092,4078,6965,6777,6857,6920,4062,5803,6376,485A,278A,6702,6701",
         help="例: トヨタ自動車なら 7203。複数銘柄はカンマまたは改行で区切ってください。",
     )
     period = st.selectbox("表示期間", ["6mo", "1y", "2y", "10y"], index=1)
