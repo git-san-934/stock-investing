@@ -311,6 +311,7 @@ class PromisingStock:
     name: str
     score: float
     reasons: list[str]
+    price_history: pd.DataFrame  # スコア算出時に取得済みのデータ(チャート表示用に再取得しない)
 
 
 def score_stock(df: pd.DataFrame) -> float | None:
@@ -373,7 +374,9 @@ def select_top_promising_by_market(n_per_market: int = 10, period: str = "6mo") 
             f"直近の売買代金(20日平均比): {turnover_text}",
             f"直近5営業日騰落率: {recent_return:+.1f}%",
         ]
-        stock = PromisingStock(code=code, name=names.get(code, code), score=score, reasons=reasons)
+        stock = PromisingStock(
+            code=code, name=names.get(code, code), score=score, reasons=reasons, price_history=df
+        )
         market = markets.get(code, "不明")
         scored_by_market.setdefault(market, []).append(stock)
 

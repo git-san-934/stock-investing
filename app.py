@@ -281,12 +281,7 @@ def render_promising_tab(period: str) -> None:
                         for reason in s.reasons:
                             st.write(f"- {reason}")
 
-                        try:
-                            chart_df = compute_indicators(load_price_history(s.code, period))
-                        except Exception as e:
-                            st.warning(f"チャート用データの取得に失敗しました: {e}")
-                        else:
-                            render_price_chart(chart_df, key=f"promising_price_{market}_{s.code}")
+                        render_price_chart(s.price_history, key=f"promising_price_{market}_{s.code}")
     else:
         st.info("ボタンを押すと、対象ユニバース内のデータを取得してスコアリングを実行します(数十秒〜数分かかる場合があります)。")
 
