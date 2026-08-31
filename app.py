@@ -21,7 +21,7 @@ from stock_signals import (
     simulate_sell_strategy,
 )
 
-ZONE_COLOR = {"買い時": "rgba(46, 139, 87, 0.15)", "様子見": "rgba(120, 120, 120, 0.12)"}
+ZONE_COLOR = {"買い時": "rgba(220, 53, 69, 0.18)", "様子見": "rgba(255, 193, 7, 0.18)"}
 
 
 def zone_segments(levels: pd.Series) -> list[tuple]:
@@ -70,8 +70,8 @@ with st.sidebar:
     st.markdown("**売りと判断する条件**")
     st.markdown(f"- 前日終値が{MA_SHORT_WINDOW}日移動平均線の上にあり、本日終値が下回った(下抜けの瞬間)")
     st.markdown("**買い時/様子見の条件**")
-    st.markdown(f"- 終値が{MA_SHORT_WINDOW}日移動平均線より上: 買い時")
-    st.markdown(f"- 終値が{MA_SHORT_WINDOW}日移動平均線より下: 様子見")
+    st.markdown(f"- 終値が{MA_SHORT_WINDOW}日移動平均線より上: 買い時(チャート背景:赤)")
+    st.markdown(f"- 終値が{MA_SHORT_WINDOW}日移動平均線より下: 様子見(チャート背景:黄色)")
 
 
 def render_watchlist_tab(raw_codes: str, period: str) -> None:
@@ -180,7 +180,7 @@ def render_watchlist_tab(raw_codes: str, period: str) -> None:
             st.plotly_chart(price_fig, width="stretch", key=f"price_{code}")
             st.caption(
                 f"背景色は終値と{MA_SHORT_WINDOW}日移動平均線の位置関係を表します"
-                "(買い時=淡いグリーン、様子見=淡いグレー)。売り検討シグナル(▼マーク)とは別の判定です。"
+                "(買い時=赤、様子見=黄色)。売り検討シグナル(▼マーク)とは別の判定です。"
             )
 
             turnover_fig = go.Figure()
