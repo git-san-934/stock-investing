@@ -33,16 +33,26 @@ def zone_segments(levels: pd.Series) -> list[tuple]:
     return [(group.index[0], group.index[-1], group.iloc[0]) for _, group in valid.groupby(group_id)]
 
 
-def render_price_chart(df: pd.DataFrame, key: str) -> None:
+CANDLE_COLOR_UP = "#3D9970"
+CANDLE_COLOR_DOWN = "#FF4136"
+
+
+def render_price_chart(df: pd.DataFrame, key: str, swap_candle_colors: bool = False) -> None:
     """株価チャート(ローソク足 + 移動平均線 + 買い時/様子見の背景帯)を描画する。
 
     ウォッチリスト・有望銘柄(AI選定)の両タブから共通で使う。
+    swap_candle_colors=Trueの場合、陽線/陰線(ローソク足の上昇/下落)の色を入れ替える。
     """
+    up_color, down_color = (
+        (CANDLE_COLOR_DOWN, CANDLE_COLOR_UP) if swap_candle_colors else (CANDLE_COLOR_UP, CANDLE_COLOR_DOWN)
+    )
     price_fig = go.Figure()
     price_fig.add_trace(
         go.Candlestick(
             x=df.index, open=df["Open"], high=df["High"], low=df["Low"], close=df["Close"],
             name="株価",
+            increasing_line_color=up_color, increasing_fillcolor=up_color,
+            decreasing_line_color=down_color, decreasing_fillcolor=down_color,
         )
     )
     price_fig.add_trace(
@@ -281,7 +291,9 @@ def render_promising_tab(period: str) -> None:
                         for reason in s.reasons:
                             st.write(f"- {reason}")
 
-                        render_price_chart(s.price_history, key=f"promising_price_{market}_{s.code}")
+                        render_price_chart(
+                            s.price_history, key=f"promising_price_{market}_{s.code}", swap_candle_colors=True
+                        )
     else:
         st.info("ボタンを押すと、対象ユニバース内のデータを取得してスコアリングを実行します(数十秒〜数分かかる場合があります)。")
 
