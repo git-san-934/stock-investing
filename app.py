@@ -132,7 +132,7 @@ with st.sidebar:
         value="285A,7974,6981,6961,6134,4092,4078,6965,6777,6857,6920,4062,5803,6376,485A,278A,6702,6701,1329",
         help="例: トヨタ自動車なら 7203。複数銘柄はカンマまたは改行で区切ってください。",
     )
-    period = st.selectbox("表示期間", ["6mo", "1y", "2y", "3y", "10y"], index=1)
+    period = st.selectbox("表示期間", ["3mo", "6mo", "1y", "2y", "3y", "10y"], index=0)
     st.button("表示する")
 
     st.markdown("---")
@@ -250,7 +250,10 @@ def render_watchlist_tab(raw_codes: str, period: str) -> None:
             st.dataframe(pd.DataFrame(trades_rows), width="stretch", hide_index=True, key=f"trades_{code}")
 
 
-def render_promising_tab(period: str) -> None:
+AI_SELECTION_PERIOD = "1y"  # スコアリングには75日移動平均線が必要なため、表示期間の選択に関わらず十分な期間を使う
+
+
+def render_promising_tab() -> None:
     """「有望銘柄(AI選定)」タブの内容を描画する。"""
     st.subheader("有望銘柄(AI選定)")
     st.caption(
@@ -263,12 +266,16 @@ def render_promising_tab(period: str) -> None:
         "特にスタンダード・グロース市場の候補は、公式データを直接参照できない制約のもとで作成した一覧のため、"
         "件数が少なく、市場区分に誤りが含まれる可能性があります。"
     )
+    st.caption(
+        "スコアリングには75日移動平均線を使うため、サイドバーの表示期間の選択に関わらず"
+        "直近1年分のデータで算出します。"
+    )
 
     if st.button("有望銘柄を探索する"):
         progress = st.progress(0, text="対象銘柄のデータを取得・スコアリング中です…")
         results: dict = {}
         try:
-            results = load_top_promising_by_market(10, period)
+            results = load_top_promising_by_market(10, AI_SELECTION_PERIOD)
         except Exception as e:
             st.error(f"有望銘柄の算出中にエラーが発生しました: {e}")
         finally:
@@ -312,4 +319,4 @@ with tab_watchlist:
     render_watchlist_tab(raw_codes, period)
 
 with tab_promising:
-    render_promising_tab(period)
+    render_promising_tab()
