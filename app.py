@@ -18,6 +18,7 @@ from stock_signals import (
     fetch_price_history,
     parse_watchlist_codes,
     select_top_promising_by_market,
+    select_top_recommended,
     simulate_buy_zone_strategy,
 )
 
@@ -124,6 +125,11 @@ def load_company_name(code: str) -> str:
 @st.cache_data(ttl=86400)
 def load_top_promising_by_market(n_per_market: int, period: str):
     return select_top_promising_by_market(n_per_market=n_per_market, period=period)
+
+
+@st.cache_data(ttl=86400)
+def load_top_recommended(n: int, period: str):
+    return select_top_recommended(n=n, period=period)
 
 
 with st.sidebar:
@@ -313,10 +319,64 @@ def render_promising_tab() -> None:
         st.info("ボタンを押すと、対象ユニバース内のデータを取得してスコアリングを実行します(数十秒〜数分かかる場合があります)。")
 
 
-tab_watchlist, tab_promising = st.tabs(["ウォッチリスト", "有望銘柄(AI選定)"])
+def render_recommended_tab() -> None:
+    """「今のおすすめ」タブの内容を描画する。"""
+    st.subheader("今のおすすめ")
+    st.caption(
+        "対象ユニバース(プライム/スタンダード/グロース全体)を横断し、"
+        "売買代金の急増を最も重視したルールベースの基準で、今おすすめできる上位3銘柄を選びます。"
+        "外部AI/LLMは使用していません。投資助言ではなく、あくまで参考情報です。"
+    )
+    st.caption(
+        "判定基準: ①売買代金(20日平均比)の急増を最優先 ②直近の騰落率・買い時状態・"
+        "ゴールデンクロス状態を補助的に加味した総合スコアで順位付けします。"
+    )
+    st.caption(
+        "対象ユニバースは東証全銘柄を網羅したものではなく、主要銘柄を中心とした静的リストです。"
+    )
+
+    if st.button("今のおすすめを探索する"):
+        progress = st.progress(0, text="対象銘柄のデータを取得・スコアリング中です…")
+        top_stocks = []
+        try:
+            top_stocks = load_top_recommended(3, AI_SELECTION_PERIOD)
+        except Exception as e:
+            st.error(f"おすすめ銘柄の算出中にエラーが発生しました: {e}")
+        finally:
+            progress.progress(100, text="完了しました")
+            progress.empty()
+
+        if not top_stocks:
+            st.warning("おすすめ銘柄を算出できませんでした。データ取得状況をご確認ください。")
+        else:
+            ranking_df = pd.DataFrame(
+                [
+                    {"順位": i + 1, "証券コード": s.code, "銘柄名": s.name, "スコア": round(s.score, 2)}
+                    for i, s in enumerate(top_stocks)
+                ]
+            )
+            st.dataframe(ranking_df, width="stretch", hide_index=True)
+
+            for i, s in enumerate(top_stocks):
+                with st.expander(f"{i + 1}位 {s.code} {s.name}(スコア: {s.score:.2f})", expanded=(i == 0)):
+                    for reason in s.reasons:
+                        st.write(f"- {reason}")
+
+                    render_price_chart(s.price_history, key=f"recommended_price_{s.code}")
+                    render_turnover_chart(s.price_history, key=f"recommended_turnover_{s.code}")
+    else:
+        st.info("ボタンを押すと、対象ユニバース内のデータを取得してスコアリングを実行します(数十秒〜数分かかる場合があります)。")
+
+
+tab_watchlist, tab_promising, tab_recommended = st.tabs(
+    ["ウォッチリスト", "有望銘柄(AI選定)", "今のおすすめ"]
+)
 
 with tab_watchlist:
     render_watchlist_tab(raw_codes, period)
 
 with tab_promising:
     render_promising_tab()
+
+with tab_recommended:
+    render_recommended_tab()

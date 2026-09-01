@@ -404,3 +404,72 @@ def select_top_promising_by_market(n_per_market: int = 10, period: str = "6mo") 
         stocks.sort(key=lambda s: s.score, reverse=True)
 
     return {market: stocks[:n_per_market] for market, stocks in scored_by_market.items()}
+
+
+def score_by_turnover_surge(df: pd.DataFrame) -> float | None:
+    """売買代金の急増を最優先指標としたスコアを算出する(参考値、投資助言ではない)。
+
+    「今おすすめの銘柄」タブで使用する。score_stock(有望銘柄AI選定タブ用)とは別の基準:
+    * 売買代金(20日平均比)を最も重く評価する(注目度が急に高まっている銘柄を優先)
+    * 直近5営業日騰落率・買い時状態(25日線より上)・ゴールデンクロス状態を副次的に加味する
+    データ不足で指標が算出できない場合はNoneを返す。
+    """
+    if len(df) < MA_LONG_WINDOW + 5:
+        return None
+
+    latest = df.iloc[-1]
+    if pd.isna(latest["ma_short"]) or pd.isna(latest["turnover_ratio"]):
+        return None
+
+    turnover_ratio = float(latest["turnover_ratio"])
+    recent_return = (latest["Close"] - df["Close"].iloc[-6]) / df["Close"].iloc[-6] * 100
+    buy_zone_bonus = 5.0 if latest["Close"] > latest["ma_short"] else 0.0
+    golden_cross_bonus = (
+        2.0 if pd.notna(latest["ma_long"]) and latest["ma_short"] > latest["ma_long"] else 0.0
+    )
+
+    return float(
+        turnover_ratio * 10.0
+        + recent_return * 1.0
+        + buy_zone_bonus
+        + golden_cross_bonus
+    )
+
+
+def select_top_recommended(n: int = 3, period: str = "1y") -> list[PromisingStock]:
+    """全市場区分を横断し、売買代金の急増を中心とした基準で「今のおすすめ」上位n銘柄を算出する。
+
+    有望銘柄(AI選定)タブ(市場区分ごとの上位10銘柄)とは別の基準・別の一覧。
+    参考情報であり投資助言ではない。外部AI/LLMは使用しない。
+    """
+    universe = load_universe()
+    codes = universe["code"].tolist()
+    names = dict(zip(universe["code"], universe["name"]))
+
+    histories = fetch_price_history_batch(codes, period=period)
+
+    scored: list[PromisingStock] = []
+    for code, raw_df in histories.items():
+        df = compute_indicators(raw_df)
+        score = score_by_turnover_surge(df)
+        if score is None:
+            continue
+
+        latest = df.iloc[-1]
+        turnover_text = (
+            f"{latest['turnover_ratio']:.2f}倍" if pd.notna(latest["turnover_ratio"]) else "算出不可"
+        )
+        recent_return = (latest["Close"] - df["Close"].iloc[-6]) / df["Close"].iloc[-6] * 100
+        reasons = [
+            f"売買代金(20日平均比): {turnover_text}(最重視)",
+            f"直近5営業日騰落率: {recent_return:+.1f}%",
+            f"状態: {'買い時' if latest['Close'] > latest['ma_short'] else '様子見'}",
+            f"ゴールデンクロス状態(25日線>75日線): "
+            f"{'はい' if pd.notna(latest['ma_long']) and latest['ma_short'] > latest['ma_long'] else 'いいえ'}",
+        ]
+        scored.append(
+            PromisingStock(code=code, name=names.get(code, code), score=score, reasons=reasons, price_history=df)
+        )
+
+    scored.sort(key=lambda s: s.score, reverse=True)
+    return scored[:n]
