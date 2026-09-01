@@ -88,6 +88,20 @@ def render_price_chart(df: pd.DataFrame, key: str, swap_candle_colors: bool = Fa
     )
 
 
+def render_turnover_chart(df: pd.DataFrame, key: str) -> None:
+    """売買代金の推移チャート(棒グラフ + 移動平均)を描画する。
+
+    ウォッチリスト・有望銘柄(AI選定)の両タブから共通で使う。
+    """
+    turnover_fig = go.Figure()
+    turnover_fig.add_trace(go.Bar(x=df.index, y=df["turnover"], name="売買代金"))
+    turnover_fig.add_trace(
+        go.Scatter(x=df.index, y=df["turnover_ma"], name=f"{TURNOVER_MA_WINDOW}日平均売買代金", line=dict(width=1))
+    )
+    turnover_fig.update_layout(title="売買代金", height=300)
+    st.plotly_chart(turnover_fig, width="stretch", key=key)
+
+
 st.set_page_config(page_title="売り時・買い時判断ダッシュボード", layout="wide")
 
 st.title("株の売り時・買い時判断ダッシュボード")
@@ -195,14 +209,7 @@ def render_watchlist_tab(raw_codes: str, period: str) -> None:
                 st.write(f"- {reason}")
 
             render_price_chart(df, key=f"price_{code}")
-
-            turnover_fig = go.Figure()
-            turnover_fig.add_trace(go.Bar(x=df.index, y=df["turnover"], name="売買代金"))
-            turnover_fig.add_trace(
-                go.Scatter(x=df.index, y=df["turnover_ma"], name=f"{TURNOVER_MA_WINDOW}日平均売買代金", line=dict(width=1))
-            )
-            turnover_fig.update_layout(title="売買代金", height=300)
-            st.plotly_chart(turnover_fig, width="stretch", key=f"turnover_{code}")
+            render_turnover_chart(df, key=f"turnover_{code}")
 
             display_columns = ["Close", "Volume", "turnover", "turnover_ratio", "ma_short", "ma_long"]
             st.dataframe(
@@ -294,6 +301,7 @@ def render_promising_tab(period: str) -> None:
                         render_price_chart(
                             s.price_history, key=f"promising_price_{market}_{s.code}", swap_candle_colors=True
                         )
+                        render_turnover_chart(s.price_history, key=f"promising_turnover_{market}_{s.code}")
     else:
         st.info("ボタンを押すと、対象ユニバース内のデータを取得してスコアリングを実行します(数十秒〜数分かかる場合があります)。")
 
